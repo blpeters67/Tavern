@@ -1,0 +1,548 @@
+TAVERN HANDOFF: how it works and how to work on it
+For agents and developers picking up Tavern. Written for version 2.3.0 (September 2026).
+
+==========================================================================================
+1. START HERE
+==========================================================================================
+
+Read README.md first. It explains what Tavern is, every user-facing feature, how it's
+deployed (Docker Compose behind a Cloudflare Tunnel), the .env settings, backups and the dev
+setup. This file doesn't repeat any of that. It explains how the code works and the rules
+that keep it working. Come back here once you've read the README.
+
+Ground rules:
+- Tavern belongs to Benji and is used by him and a small group of friends. It is not a
+  product for distribution. Prefer simple, reliable and low-maintenance over clever.
+- The code is on GitHub, in a public repository: https://github.com/blpeters67/Tavern
+  (branch main). The Tavern folder on Benji's PC is his working copy. Pull and read files
+  fresh before you edit (someone else may have changed them), keep changes and commits
+  focused, don't reformat code you aren't otherwise changing, and tell Benji exactly which
+  files you changed.
+- Never read out, copy, print, log or commit the contents of .env. It holds the tunnel
+  token, the Gmail app password and the Spotify secret. Never touch data/, which is the live
+  database and uploads. Both are git-ignored; keep it that way, since the repository is
+  public. .env.example is only a template and is safe to edit.
+
+==========================================================================================
+2. THE SHAPE OF IT
+==========================================================================================
+
+  Browser (React single-page app)
+     |-- REST calls to /api/* ------------------------> FastAPI in ONE uvicorn process
+     |<- WebSocket /api/gateway: live events, voice signaling, clock sync ->|
+     |<- /cdn/*: uploaded files, served with permission checks ------------|
+     '-- WebRTC mesh: voice, camera and screen go browser to browser; the server only
+         relays the signaling
+
+Durable state: SQLite (data/tavern.db, WAL mode) plus files in data/uploads/<bucket>/.
+
+In-memory state, lost on restart: gateway connections and presence, voice rooms, the jukebox
+and theater clocks, timers and listeners, the rate limiter and the first-run setup code. This
+is why there must be exactly one process. Never add uvicorn workers or a second replica.
+
+Production: the Dockerfile builds the frontend with Node 22, then serves frontend/dist from
+the Python 3.12 image (TAVERN_STATIC_DIR=/app/static, TAVERN_DATA_DIR=/data). ffmpeg and Deno
+(which yt-dlp needs for YouTube) are installed in the image. docker-entrypoint.py updates
+yt-dlp as root on every start, fixes the ownership of /data, then drops to the tavern user
+(uid 1000). FastAPI's /docs and OpenAPI are switched off; the route modules are the API
+reference.
+
+Dependencies: backend/requirements.txt pins exact versions, except yt-dlp, which is left
+unpinned on purpose because sites change often. frontend/package-lock.json locks the
+frontend (Docker runs npm ci). Upgrade deliberately and re-run the checks in section 8.
+
+==========================================================================================
+3. REPO MAP
+==========================================================================================
+
+backend/tavern/
+  main.py          App factory. GuardMiddleware checks the origin of writes, rejects
+                   oversized bodies early and adds security headers and the CSP. The
+                   lifespan handles startup. Also the SPA fallback and cache headers.
+  config.py        Every environment variable, read once into `settings`.
+  db.py            Engine and sessions, queue_event() and publishing after commit, schema
+                   setup and upgrades, the FTS5 search index.
+  models.py        All the tables (SQLAlchemy 2.0).
+  serializers.py   Every JSON shape the frontend sees. DEFAULT_SETTINGS for user settings.
+  services.py      Shared logic: loading things with permission checks, create_message,
+                   mentions, read states, the READY payload.
+  permissions.py   Permission bits (P), ServerContext (the resolver), channel_access().
+  deps.py          ApiError and helpers, current_user (cookie auth), sessions, client_ip,
+                   origin_allowed.
+  gateway.py       WebSocket hub: connections per user, publish() from any thread.
+  voice.py         Voice rooms and the WebRTC signaling relay (event-loop thread).
+  playback.py      Shared queue and clock. jukebox.py and theater.py build on it.
+  jukebox.py       Music library, ffmpeg processing (loudness gain, covers), yt-dlp imports,
+                   YouTube search.
+  theater.py       Video library: YouTube lookups (no downloads), uploads converted by ffmpeg.
+  spotify.py       Spotify Web API (song names only) and matching the songs on YouTube.
+  dice.py          Dice notation, server-side rolling, sheet-aware checks.
+  sheets.py        D&D 5e sheet schema (clean, merge_patch) and maths.
+  files.py         Upload buckets, image normalising, attachment previews.
+  embeds.py        Link previews, built in a background thread. Refuses private addresses.
+  security.py      argon2 hashing, tokens, RateLimiter.
+  mailer.py        SMTP for password resets.
+  backup.py        `python -m tavern.backup`.
+  routes/          One module per area: auth, users, characters (+ sheets), servers,
+                   channels, messages, rolls, search, dms, invites, voice, jukebox, theater,
+                   spotify, cdn, gateway_ws.
+backend/tests/     End-to-end smoke tests. Each starts a real server on a temp data dir.
+
+frontend/src/
+  main.tsx, App.tsx      Font and CSS imports; routes (/login, /register, /reset-password,
+                         /invite/:code, /channels/*).
+  api/http.ts            fetch wrapper: api.get/post/put/patch/del, upload() with
+                         progress, ApiError with per-field messages, errorMessage().
+  api/gateway.ts         WebSocket client: heartbeats, reconnects with backoff, READY
+                         buffering, send(op, d).
+  store/store.ts         The zustand store: State, gateway event handlers, applyReady(), the
+                         message-window constants.
+  store/actions.ts       What the UI does: HTTP calls, optimistic updates, loading messages.
+  store/selectors.ts     Derived data: permissions, names, colours, channel groups (memoized
+                         where it's hot).
+  store/types.ts         TypeScript mirror of the serializers.py shapes.
+  lib/                   Logic outside React: voice.ts (WebRTC engine), micChain.ts,
+                         jukebox.ts, theater.ts, clock.ts, duck.ts, sounds.ts, markdown.tsx,
+                         richtext.ts, compose.ts, fxEditor.ts, textEffects.ts, rolls.ts,
+                         sheet.ts, sheetStore.ts, permissions.ts, emoji.ts, format.ts,
+                         storage.ts, events.ts and a few small helpers.
+  components/            UI pieces. pages/AppShell.tsx is the logged-in layout. settings/
+                         holds the User, Server, Channel, Role and Voice settings screens.
+                         modals/ holds dialogs.
+  styles/                Plain global CSS, one file per area, all imported in main.tsx.
+frontend/public/theater-frame.html   The page that hosts YouTube's player (see 5.8).
+frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/twemoji/
+                                     before every dev run and build. Both are generated,
+                                     ignored outputs.
+
+==========================================================================================
+4. BACKEND
+==========================================================================================
+
+4.1 Requests
+- Route handlers are plain `def` functions, so FastAPI runs them in its thread pool. They
+  take `user: User = Depends(current_user)` (the tavern_session cookie) and
+  `db: Session = Depends(get_db)`.
+- The usual shape: load the thing and check permissions (services.load_channel, load_server,
+  require_server_perm; these raise 404/403 for you), change rows,
+  queue_event(db, audience, "EVENT_NAME", payload), db.commit(), return the payload.
+- queue_event() holds events on the session. db.py publishes them only after the commit
+  succeeds and drops them on rollback, so nobody sees something that didn't happen. Use it
+  for anything stored in the database. Call gateway.publish() directly only for in-memory
+  state (voice, jukebox listeners, theater seats).
+- Errors: raise ApiError(status, "Message for the user.", errors={field: msg}) or use the
+  helpers in deps.py (bad_request, forbidden, not_found, rate_limit). Clients receive
+  {"detail", "errors"?, "code"?}. Pydantic validation failures become 400 with per-field
+  "errors". The frontend shows these messages as they are, so write plain, friendly English.
+- Every JSON shape comes from serializers.py and is mirrored in frontend/src/store/types.ts.
+  Change both together.
+- Rate limits: rate_limit(key, limit, window_seconds), an in-memory sliding window. Examples:
+  sending 15 per 10 s, rolling 20 per 10 s, reacting 30 per 10 s, logging in 8 per 5 min per
+  IP and name.
+- Timestamps are naive UTC in the database; serializers.iso() adds the "Z".
+- Slow work (yt-dlp, ffmpeg, link previews, Spotify) runs in background threads that open
+  their own SessionLocal() and publish when they finish. Never block the event loop, and
+  don't make network calls inside a request while holding a write transaction.
+
+4.2 Live events (the gateway)
+- Each browser tab holds one WebSocket at /api/gateway (cookie auth plus an origin check).
+  The server sends hello (op 10), then READY: op 0 with t=READY, built by
+  services.build_ready(). It carries me, servers (with channels, roles, members, emojis,
+  voice states, jukebox and theater), DMs, users, characters, read states, personas and
+  limits.
+- Server to client: op 0 dispatch {t, d}, op 11 heartbeat ack, op 7 clock reply.
+  Client to server: op 1 heartbeat (every 30 s; the socket closes after 2.5 missed
+  intervals), op 7 clock sync, op 4 voice state, op 5 WebRTC signal, op 6 speaking,
+  op 9 jukebox listen, op 10 theater seat.
+  Close codes: 4001 not logged in, 4003 bad origin, 4004 session ended (logout or password
+  change), 4008 client too slow (over 5000 queued messages), 4009 heartbeat timed out.
+- The connection is registered before READY is built, so events can arrive before READY.
+  The client buffers them and applies them after READY, and READY may already include some
+  of them (a message sent while READY was being built shows up in both). So every state
+  handler in store.ts must be safe to apply to state that already has its change, and safe
+  to apply twice. Most are by nature (they set, merge or remove by id, or check a rev).
+  Anything that counts needs a guard: MESSAGE_CREATE only adds a mention to the badge if
+  it's newer than the read marker and than READY's last_mention_id for that channel, and
+  only once (mentionsCounted). The VOICE_* signaling events are one-shot commands passed to
+  the voice engine; each arrives once per connection.
+- Who receives what: server-level events (channels, roles, members, emojis, server changes)
+  go to every member. Channels you can't view are sent too, as on Discord, and the frontend
+  hides them by computing permissions. Message events go to services.message_audience():
+  the people who can view the channel, except dm_only messages (private rolls), which only
+  the author and Dungeon Masters get.
+- Event names: MESSAGE_CREATE/UPDATE/DELETE, MESSAGE_REACTION_ADD/REMOVE,
+  CHANNEL_CREATE/UPDATE/DELETE, CHANNEL_PINS_UPDATE, SERVER_CREATE/UPDATE/DELETE,
+  MEMBER_ADD/UPDATE/REMOVE, ROLES_UPDATE, ROLE_DELETE, EMOJIS_UPDATE, USER_UPDATE, ME_UPDATE,
+  PRESENCE_UPDATE, CHARACTER_CREATE/UPDATE, CHARACTER_SHEET_UPDATE, READ_STATE_UPDATE,
+  PERSONA_UPDATE, CHANNEL_PERSONA, TYPING_START, VOICE_*, JUKEBOX_*, THEATER_*. Every one has
+  a handler in `handlers` in store/store.ts. A new event needs one too.
+- Presence: someone is online while they have at least one socket. Going offline waits 4 s
+  so a page refresh doesn't flicker them offline.
+
+4.3 Database and schema changes
+- SQLite with WAL, foreign keys on and a 30 s busy timeout. There is no Alembic.
+- At startup init_db() runs create_all (new tables), then _add_missing_columns() (adds any
+  model column that its table lacks; the column must be nullable or have a scalar default,
+  or it's skipped with a warning), then sets up the FTS5 index (messages_fts, kept in sync
+  by triggers), then one-time upgrades keyed on PRAGMA user_version. SCHEMA_VERSION is 3:
+  v2 tidied up 1.x servers, v3 set the book flag on old character messages.
+- Adding a column: put it on the model, nullable or with a default. Where it helps, store
+  None to mean "the default" (Channel.bitrate does this). Renames, removals and data
+  rewrites: bump SCHEMA_VERSION and add an _upgrade_to_vN() that runs only for existing
+  databases (had_data and version < N).
+- Anything that must survive a restart belongs in the database.
+
+4.4 Permissions
+- Discord-style bits in permissions.P, mirrored in frontend/src/lib/permissions.ts. Keep the
+  values identical, and keep bits under 2^31 so JavaScript's bitwise operators work. The
+  owner and anyone with ADMINISTRATOR get everything.
+- Resolution: @everyone plus the member's roles, then the parent category's overwrites,
+  then the channel's own overwrites (each applied in the order @everyone, roles, member).
+  Without VIEW_CHANNEL a member has no permissions in that channel at all. Unlike Discord's
+  "synced" categories, a channel always inherits its category's overwrites and applies its
+  own on top.
+- Use ServerContext.load(db, server) for questions about many people (viewers(), dm_ids())
+  and channel_access(db, channel, user_id) for "may this person do X here" and audience().
+- DUNGEON_MASTER: roll for others, edit any sheet, narrate, see private rolls, switch DM Lock.
+  DJ: run the jukebox and theater. can_control_jukebox(): Dungeon Masters always, DJs only
+  while DM Lock is off. The theater uses the same rule.
+- Adding a permission: a new bit in both files, include it in CHANNEL_MASK if it makes sense
+  per channel, label it in the role and channel settings screens, and decide whether it
+  belongs in DEFAULT_EVERYONE or the roles services.create_server() makes for new servers.
+
+4.5 Messages
+- routes/messages.py: history (before, after or around an id; up to 100 at a time), sending
+  (multipart with files; the client's nonce comes back so its pending copy can be matched),
+  editing, deleting, reactions and pins. services.create_message() does the shared work:
+  mentions (@everyone needs MENTION_EVERYONE), reply previews, the author's read state,
+  MESSAGE_CREATE to the audience, then link previews in the background.
+- Message types: 0 normal, 1 and 2 group-DM add and remove, 4 group-DM rename, 6 pin notice,
+  7 member joined, 20 dice roll (meta.roll holds the result). meta.narrator marks narration.
+  `book` is the book look. `character_id` is the character it was sent as (null means the
+  person themself).
+- Search (routes/search.py) turns the query into FTS5 syntax and filters the results by
+  channel permission, loading overwrites for many channels in one query (ctx.preload).
+
+4.6 Files, previews and link previews
+- Uploads live in data/uploads/<bucket>/<random name>. Buckets: avatars, icons, emojis,
+  attachments, previews, music, covers, videos, posters, tmp. Names come from random_key(),
+  and a file never changes once it's written.
+- routes/cdn.py serves them. Avatars and server icons are public at unguessable URLs, custom
+  emojis need a login, and attachments (and their previews) need access to the channel they
+  were posted in. Music and video support byte-range requests.
+- Big still pictures get a WebP preview, scaled to fit in 1100x700 and made on first
+  request by files.ensure_preview(). files.wants_preview() decides which pictures get one:
+  png, jpeg, webp, bmp or avif files over 300 KB, or bigger than 1100x700 at any file size.
+  Animated pictures keep the original. attachment_payload() adds preview_url.
+  Previews are disposable and are deleted along with their attachment.
+- Link previews (embeds.py) are fetched in a background thread after a message is sent and
+  arrive as MESSAGE_UPDATE. Private and loopback addresses are refused. The same check guards
+  jukebox link imports unless JUKEBOX_ALLOW_PRIVATE_URLS is on.
+
+4.7 Voice
+- voice.py VoiceManager runs on the event-loop thread (helpers marked "any thread" hop onto
+  it). It tracks who is in which voice space, self and server mute and deafen, camera and
+  stream flags and speaking, and relays WebRTC offers, answers and ICE candidates (op 5)
+  between people in the same space. Media never reaches the server.
+- A dropped socket keeps its seat for RESUME_GRACE (12 s), so a refresh or brief reconnect
+  doesn't kick anyone. Joining from another tab takes over and tells the old tab
+  (VOICE_SESSION_REPLACED).
+- Moderation (server mute, server deafen, move, disconnect) is
+  PATCH /api/servers/{sid}/members/{uid}/voice. GET /api/voice/ice-servers returns the STUN
+  list plus any TURN servers from .env. Cloudflare TURN credentials are generated with the
+  API token and cached for 12 hours.
+- Channel.bitrate (kbps, 8 to 256; empty means 64) is the microphone bitrate for everyone in
+  that voice space. Voice channel payloads carry it as `bitrate`, and each browser applies
+  it (see 5.7).
+
+4.8 Jukebox and theater (shared playback)
+- playback.PlaybackManager keeps, per server: the queue, the current item, history,
+  playing, started_at, position, repeat, shuffle, transitions (fades), `rev` (bumped on
+  every change) and listeners (people listening, or seated in the theater). The server is
+  the authority. started_at is the server time in epoch ms at which position 0 played, so
+  any client can compute position = now - started_at. Timers advance the queue when an item
+  ends. State is saved in the JukeboxState and TheaterState tables and resumed at startup.
+- Controls go through routes/jukebox.py and routes/theater.py. Changes publish
+  JUKEBOX_STATE or THEATER_STATE to every server member.
+- Tracks and videos are processed in the background. Rows start as "processing" with
+  progress updates and end "ready" or "failed". reset_stuck_tracks() and
+  reset_stuck_videos() clean up rows a restart interrupted. ffmpeg converts audio and
+  measures loudness (gain_db). Uploaded videos are remuxed or converted to an MP4 that every
+  browser plays.
+- YouTube theater videos are never downloaded. The server only looks up the title and
+  length, and rechecks a video when a viewer's player reports an error, skipping it for
+  everyone if it really can't be shown.
+
+4.9 Characters, sheets and dice
+- Characters belong to a user. Personas: 0 is yourself, -1 the narrator (Dungeon Masters
+  only), anything above 0 a character id. The persona picked in each channel is remembered
+  on the server (PUT /api/channels/{id}/persona, which sends PERSONA_UPDATE to you and
+  CHANNEL_PERSONA to everyone else).
+- A sheet is one JSON document per character. Clients send JSON Merge Patches (RFC 7396);
+  sheets.clean() drops unknown keys, coerces types and clamps sizes. Lists that several
+  people may edit at once (inventory, spells, attacks...) are maps keyed by short ids, so
+  edits to different entries merge. sheets.py and frontend/src/lib/sheet.ts contain the same
+  maths. Change both.
+- Dice are rolled on the server (dice.py, routes/rolls.py). A roll is a message of type 20
+  with meta.roll. Private rolls are dm_only.
+
+4.10 Accounts and security
+- Sign-up is invite-only. While there are no accounts, the log prints a one-time link
+  (/register?setup=CODE) for the owner.
+- Sessions are random tokens in the tavern_session cookie (HttpOnly, SameSite=Lax, Secure on
+  https, 30 days), stored hashed. Passwords use argon2. Logging out or changing a password
+  ends the sessions and closes their sockets (4004).
+- CSRF: GuardMiddleware refuses unsafe /api requests whose Origin isn't PUBLIC_URL, the
+  host itself or one of ALLOWED_ORIGINS.
+- CSP (APP_CSP in main.py): scripts only from Tavern and YouTube's player, frames only
+  YouTube and Tavern's own theater frame, connect-src only Tavern (ws and wss included).
+  The browser can't call outside services directly; go through the backend. If a feature
+  really needs another origin, change APP_CSP on purpose. theater-frame.html has its own
+  stricter CSP (THEATER_FRAME_CSP) and only Tavern may frame it.
+- TRUST_PROXY_HEADERS reads the visitor's IP from Cloudflare's headers. Rate limits key on
+  it.
+
+==========================================================================================
+5. FRONTEND
+==========================================================================================
+
+5.1 Boot
+- main.tsx imports the fonts (bundled @fontsource packages; nothing loads from font hosts)
+  and every CSS file. App.tsx runs bootstrap(): GET /api/users/@me, then the gateway
+  connects. If that request fails, the person is treated as logged out. pages/AppShell.tsx
+  is the logged-in layout: server rail, channel sidebar, chat, right-hand panel (members or
+  search, plus the jukebox and theater cards) and the user panel.
+- Every READY (including after a reconnect) goes through applyReady(), which replaces the
+  server-owned state. The open channel keeps its messages on screen while it reloads under a
+  new window generation (see 5.3); other channels' cached messages are dropped.
+
+5.2 State rules (zustand)
+- One store (store/store.ts) of plain data keyed by id: users, characters, servers, roles,
+  channels, members[server][user], messages[channel], voiceStates[user], jukebox[server]...
+  The store has no methods.
+- Gateway events are applied by the handlers in store.ts (safe to repeat, see 4.2). User
+  actions are functions in store/actions.ts and the feature libs. They call the API and may
+  update optimistically; a pending message carries a nonce that the server echoes back.
+- Keep references stable. mergeInto() and hasAll() return the same object when nothing
+  changed. Replacing an unchanged object re-renders every component that selects it, and a
+  channel can show hundreds of messages.
+- Select narrowly: useStore((s) => s.users[id]), or useShallow for several fields. Never
+  select a whole map (s.users, s.channels) in anything rendered once per message. Hot derived
+  data goes in selectors.ts with memoization; myChannelPerms() and roleColor() use WeakMaps
+  keyed on the objects involved.
+- Code outside React (voice engine, jukebox and theater players) uses getState() and
+  setState(), reacts to the store with useStore.subscribe(), and hears gateway events through
+  lib/events.ts (on/emit).
+- Per-browser choices (folded cards, listening, seated, persona, voice devices and
+  processing, theater placement, volumes) live in localStorage through lib/storage.ts, which
+  never throws. Account-wide settings live on the server: DEFAULT_SETTINGS in serializers.py
+  must match Settings in types.ts, and PATCH /api/users/@me/settings rejects unknown keys and
+  wrong types. ic_cards is a leftover from before the per-message book look and does nothing.
+
+5.3 The message window (read this before touching message loading)
+- messages[channelId] is a ChannelMessages window: list (sorted by id), hasMoreBefore,
+  hasMoreAfter, loaded, loadingBefore, loadingAfter, gen and catchingUp.
+- The invariant: the list is always one unbroken run of the channel's history, never with a
+  hole. hasMoreAfter means newer messages exist that aren't in the list. If you can't
+  guarantee the run is unbroken, set hasMoreAfter and let loading fetch the rest.
+- Sizes: about 250 messages shown (MESSAGE_WINDOW, plus WINDOW_SLACK of 50 before trimming),
+  loaded in pages of 50. Channels you've left keep IDLE_MESSAGES (50). Up to 15 channels are
+  cached, least recently used first out (channelOpened).
+- Replacing the window (loadLatest, jumpToMessage, jumpToPresent) takes a new generation
+  (newWindowGen()). Every async result is applied through patchWindow(channelId, gen, ...),
+  which drops it if the window changed in the meantime; loads also check the edge ids. The
+  newest replacement wins, and an automatic loadLatest gives way to a jump already running.
+- A live MESSAGE_CREATE is appended only when loaded && !hasMoreAfter && !catchingUp. While a
+  load catches up (up to 4 pages), live messages wait for it to fetch them. While someone
+  reads far back (setReadingBack) and the list already holds 300, new messages set
+  hasMoreAfter instead of growing the list.
+- Failures must never leave a silent gap. If a catch-up fails partway, the window stops at
+  what joins up, keeps hasMoreAfter set, and retryForward() tries again quietly (after 2, 5,
+  15 and 30 s, while the channel is open at the bottom). If loadLatest fails with nothing on
+  screen, the spinner stays and retryLatest() tries again, but only for errors worth
+  retrying (no connection, 5xx, 429).
+- MessageList keeps the view pinned to a message element when content above it changes
+  (captureAnchor/restoreAnchor) and trims old messages from the top only while following the
+  bottom. Sending while scrolled away jumps to the present.
+
+5.4 Rendering
+- A message row (components/Message.tsx) subscribes only to what it shows. Mentions are
+  small components that subscribe to their own user, character, role or channel, so renaming
+  someone doesn't re-render every message. useMarkdownCtx only carries click handlers.
+- The big optional screens (SettingsLayer, SheetLayer, TheaterWindow) are React.lazy chunks,
+  prefetched when the browser is idle. Keep new big screens lazy too.
+- Motion: text effects respect the fx_motion setting and prefers-reduced-motion. The video
+  player's progress bar is driven by a CSS variable updated each frame, not React state.
+
+5.5 Writing and showing text
+- The message box is a TipTap editor (components/ChatInput.tsx). lib/richtext.ts turns its
+  document into Discord-flavoured markdown plus Tavern's styled text, written like
+  [text]{#e0b252 large wave} for colour, size and effects. lib/compose.ts turns what was
+  typed into what's sent (proxy tags, /roll, /proll...) and back again for editing.
+  lib/fxEditor.ts previews effects inside the box.
+- lib/markdown.tsx parses with simple-markdown rules and renders React itself: bold, italic,
+  underline, strikethrough, code, spoilers, quotes, links, mentions, custom emoji, Twemoji,
+  and styled text with effects (FxRun). Effects are defined in lib/textEffects.ts and animated
+  in styles/effects.css.
+- Book look (lib/bookLook.ts, styles/roleplay.css) is per message (message.book): "quoted
+  speech" in white, everything else as italic action in a darker shade of the character's
+  colour, inside a faintly tinted box.
+
+5.6 Layers, UI kit and styles
+- components/layers.tsx: Modal, Popout/usePopout, MenuItem and tooltips. Give any element a
+  tooltip by spreading {...tip('text')} or {...tip(<Component />)}. Open dialogs and context
+  menus with openModal() and openContextMenu() from store/actions.ts. <LayerHosts/> is mounted
+  once in App.
+- components/ui.tsx: Button, Field, TextInput, TextArea, Switch, SwitchRow, Select, Slider,
+  Avatar, StatusDot, Spinner. Icons are @mdi/js paths through components/icons.tsx, plus a
+  few custom SVGs.
+- CSS is plain and global, one file per area in src/styles, imported in main.tsx. Colours
+  and sizes are CSS variables in theme.css and base.css (--green, --gold, --red...). Prefix
+  new classes by feature (.voice-panel-*, .latency-*). mobile.css holds the phone layout.
+
+5.7 Voice in the browser
+- lib/voice.ts exports `engine` (VoiceEngine): one RTCPeerConnection per other person (a
+  mesh), using "perfect negotiation" so either side can renegotiate at any time (camera or
+  screen mid-call). Signaling goes over op 5, voice state over op 4, speaking over op 6.
+  useVoiceUi holds the per-person connection state for the UI.
+- The microphone path is lib/micChain.ts: mono, then optional voice isolation (the GTCRN
+  model in an AudioWorklet from @sapphi-red/web-noise-suppressor, which needs the 48 kHz
+  'voice' AudioContext), then the gate and level meter behind input sensitivity. Its
+  settings screen is settings/VoiceSettings.tsx.
+- Outgoing streams are tuned with tuneSender() (RTCRtpSender.setParameters). The mic's
+  maxBitrate comes from the voice space's bitrate (micBitrate()), and a store subscription
+  at the bottom of voice.ts retunes it when that changes. Screen share quality lives in
+  components/StreamQuality.tsx.
+- The latency tooltip (LatencyTip in components/UserPanel.tsx, on hover over "Voice
+  Connected") polls once a second: the server's round trip from the op 7 clock ping
+  (clock.ts pingServer() and latestRtt()), and each person's round trip from getStats
+  (engine.peerLatency(): currentRoundTripTime of the selected candidate pair, marked "relay"
+  when it goes through TURN).
+- Audio rules. Benji notices pops and clicks, and fixing them took real work:
+  * Never create an AudioContext just because the page opened; opening the sound device pops
+    in some headphones. lib/sounds.ts creates the 'ui', 'music' and 'voice' contexts on first
+    real use.
+  * Never cut sound abruptly. Fade over a few dozen milliseconds (see lib/jukebox.ts).
+
+5.8 Jukebox and theater in the browser
+- lib/clock.ts estimates the server's clock, NTP-style over op 7, keeping the sample with the
+  lowest round trip. lib/jukebox.ts plays position = serverNow() - started_at: every cut
+  fades, stalls are held silent, small drift is ignored, bigger drift is caught up at 2%
+  faster or slower, and only big jumps seek. Volume = shared volume x my volume x fades x the
+  track's loudness gain x ducking (lib/duck.ts lowers the music while a theater video has
+  sound).
+- The theater is lib/theater.ts plus components/Theater.tsx and TheaterWindow.tsx. YouTube's
+  rules shaped it. These look odd but are deliberate:
+  * YouTube's player runs inside /theater-frame.html (our own page, framed by the app),
+    because YouTube refuses to play without a real referring page (error 153), including in
+    a picture-in-picture window. main.py gives that page its own CSP.
+  * The screen lives in one fixed box that is never moved in the DOM, because moving an
+    iframe reloads it. Docked, floating and expanded only change the box's position and
+    size. Picture-in-picture is the one real move; the player restarts there, in step.
+  * The player must be visible while it plays: at least 200x200 px with nothing drawn over
+    it. It never plays hidden, and taking a seat is what starts it.
+  * YouTube can't play slightly faster or slower, so it's corrected by seeking when it's
+    over 1.5 s off for three readings in a row, backing off when a seek doesn't stick (that
+    usually means an ad). Seeking a cued video can start it playing, so it's paused again if
+    it should be still. Uploaded videos catch up at 3% faster or slower instead.
+  * Browsers block sound until the person interacts with the page, so someone who opens
+    Tavern already seated sees the video muted with "Click for sound".
+
+==========================================================================================
+6. NAMES THAT MEAN SOMETHING ELSE
+==========================================================================================
+
+- "DM" means two things. Direct message: ChannelType.DM (1) and GROUP_DM (3), recipients,
+  modals/DMModals.tsx. Dungeon Master: P.DUNGEON_MASTER, ctx.is_dm(), selectors isDm() and
+  userIsDm(). Read the context.
+- DM Lock (in the UI) is server.roleplay_mode in the database and API
+  (PUT /api/servers/{id}/roleplay). It has nothing to do with the book look.
+- Voice space = a channel of type VOICE (2). Category = type 4. Server = Discord's guild.
+- Book look = message.book. Book font = the ic_serif setting. Narrator = persona -1
+  (meta.narrator on the message).
+- Puppeteer / Immersive = the `immersive` setting (true hides who plays each character).
+- Private roll = a roll message with dm_only set.
+- Jukebox listeners and theater seats are both `listeners` in the playback state.
+
+==========================================================================================
+7. RECIPES
+==========================================================================================
+
+- New field on something: model column (nullable or with a default), serializer, types.ts,
+  UI, and make sure the right *_UPDATE event carries it (the store's handlers merge fields).
+- New gateway event: queue_event() in the route, a handler in store.ts that's safe to
+  repeat (4.2), and its type in types.ts.
+- New account setting: DEFAULT_SETTINGS in serializers.py, Settings in types.ts, a SwitchRow
+  in settings/UserSettings.tsx; read it with useStore((s) => s.me?.settings.name).
+- New environment variable: config.py (Settings and load_settings()), the README settings
+  table, and .env.example if people will commonly set it.
+- New route module: add it to the include list in main.py's create_app().
+- New permission: see 4.4.
+- New voice-space option: copy how bitrate was done. Channel column, bounded field on
+  ChannelPatch, update_channel() in routes/channels.py, channel_payload() (voice only),
+  types.ts, settings/ChannelSettings.tsx, and a check in tests/smoke_v2.py.
+
+==========================================================================================
+8. CHECKS BEFORE YOU HAND BACK
+==========================================================================================
+
+- Backend, from backend/ (Python 3.12, ffmpeg on PATH):
+    python tests/smoke_test.py
+    python tests/smoke_v2.py
+    python tests/check_imports.py
+    python tests/smoke_theater.py
+  Each ends with "ALL ... PASSED" or fails loudly. Add assertions when you change server
+  behaviour.
+- `ruff check .` from backend/ must pass (default rules). Don't run `ruff format` or black:
+  lines here run long (often 150+ characters) and a formatter would rewrite nearly every file.
+- Frontend, from frontend/: `npm run typecheck` and `npm run build` must pass. There's no
+  linter, formatter or unit-test setup. Match the surrounding style (2 spaces, single quotes,
+  semicolons).
+- Check UI changes in a real browser; the repo has no browser tests. What works: build the
+  frontend, run uvicorn with TAVERN_STATIC_DIR=frontend/dist and TAVERN_DATA_DIR pointing at
+  a temporary folder, take the setup code from the log, then drive it with Playwright and
+  Chromium. Chromium builds without proprietary codecs can't play H.264, so test uploaded
+  video playback in real Chrome. For voice, launch with --use-fake-ui-for-media-stream and
+  --use-fake-device-for-media-stream, plus --use-file-for-fake-audio-capture=<a wav file>
+  when you need continuous sound (the default fake mic is mostly silence, which makes
+  bitrate readings look far too low).
+- Look at your change in a phone-sized window too (mobile.css).
+
+==========================================================================================
+9. WORKING WITH BENJI
+==========================================================================================
+
+- Deploying: Benji runs `docker compose up -d --build` in the Tavern folder, which rebuilds
+  the frontend inside Docker. Tell him when a change needs it. New columns and tables are
+  added automatically at startup.
+- The version lives in four places; bump them together: backend/tavern/__init__.py,
+  frontend/package.json, frontend/package-lock.json (the top "version" and the one under
+  packages[""]), and the footer in frontend/src/settings/UserSettings.tsx.
+- He likes brief, direct answers, and only the files that changed (not zips).
+- Look and feel: as close to Discord as possible, homemade but well made. He dislikes the
+  generic AI-built look (overly crisp, everything rounded). Reuse the existing classes and
+  CSS variables rather than inventing a new visual style.
+- Interface text: short, plain and friendly, with Discord-style capitals on buttons and
+  labels ("Jump To Present", "Take a Seat").
+- Keep README.md current when something user-facing changes. It's written for Benji and his
+  friends, not for developers. Update this file when you change how something works.
+- License: PolyForm Noncommercial 1.0.0 (LICENSE.md). Anyone may use Tavern for
+  noncommercial purposes; commercial use needs Benji's permission. Code you bring in must
+  fit: code under MIT, BSD, Apache-2.0 or ISC is fine (keep its copyright notice), but never
+  paste in GPL or AGPL code. Check a new dependency's license before adding it and prefer
+  permissive ones.
+
+==========================================================================================
+10. LIMITS AND DELIBERATE CHOICES
+==========================================================================================
+
+- One process, SQLite and in-memory live state are right for a group of friends. Don't add
+  workers, Redis or Postgres unless Benji asks for them.
+- Voice is a mesh with no media server. It's fine up to about eight people with cameras on.
+  Everyone uploads a copy of their stream to each other person, which is why the voice
+  bitrate and screen share quality are adjustable.
+- The message list isn't virtualized. It keeps a bounded window (5.3) and relies on
+  per-message render isolation (5.4).
+- Schema changes are forward-only and automatic, with no downgrade. Back up data/ before
+  anything risky (README, Backups).
+- Not built yet: a light theme, maps and initiative trackers.

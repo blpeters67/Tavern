@@ -1,0 +1,16 @@
+# Exact versions Tavern was tested with (Python 3.12). Bump deliberately and
+# re-run tests/smoke_test.py.
+fastapi==0.141.1
+starlette==1.6.0
+pydantic==2.13.5
+uvicorn[standard]==0.53.0
+sqlalchemy==2.0.54
+argon2-cffi==25.1.0
+pillow==12.3.0
+httpx==0.28.1
+python-multipart==0.0.32
+# Jukebox: tag reading, and link imports. yt-dlp is left unpinned on purpose:
+# sites change often, so every rebuild (and every container start, see
+# YTDLP_AUTO_UPDATE) picks up the newest release.
+mutagen==1.48.1
+yt-dlp[default]>=2026.8.19

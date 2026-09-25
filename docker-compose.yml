@@ -1,0 +1,31 @@
+# Tavern + a Cloudflare Tunnel. Settings live in .env (copy .env.example).
+#
+#   docker compose up -d --build     start / update
+#   docker compose logs -f tavern    watch the log (first-run setup link is here)
+#   docker compose down              stop
+
+services:
+  tavern:
+    build: .
+    image: tavern:latest
+    container_name: tavern
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
+    ports:
+      # Reachable from this machine only; friends come in through the tunnel.
+      # Change to "8080:8080" to also allow other devices on your network.
+      - "127.0.0.1:8080:8080"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: tavern-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - tavern
+    # Only started when COMPOSE_PROFILES=tunnel is set in .env.
+    profiles: [tunnel]

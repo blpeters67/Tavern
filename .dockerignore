@@ -1,0 +1,14 @@
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+frontend/dist
+frontend/public/twemoji
+frontend/src/generated
+data
+.env
+.git
+*.md
+backend/data

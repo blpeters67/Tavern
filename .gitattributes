@@ -1,0 +1,10 @@
+# Keep LF line endings so shell scripts still run on Linux after a
+# Windows checkout.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary

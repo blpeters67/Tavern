@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>Tavern Theater</title>
+    <!--
+      The theater's screen. Tavern puts YouTube's player in here rather than
+      straight into the app so the player always loads from a real web page:
+      YouTube needs to know which site embeds it, and a picture-in-picture
+      window has no address of its own to tell it. Tavern drives the player
+      from the app; this page runs nothing itself.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      #screen,
+      #screen > iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="screen"></div>
+  </body>
+</html>

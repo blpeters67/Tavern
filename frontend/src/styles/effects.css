@@ -1,0 +1,1192 @@
+/* Text effects (lib/textEffects.ts, components/TextFx.tsx).
+ *
+ * Structure of an effect run:
+ *   span.fx.fx-<id>...        the run (whole-text effects animate this)
+ *     span.fx-w  --w          each word (never breaks inside)
+ *       span.fx-ch --i --r    each letter
+ *
+ * Letters and words can carry one animation per group at once, so "wave" and
+ * "rainbow" run together: each group fills its own slot of the animation list
+ * (1 motion, 2 light, 3 entrance, 4 voice, 5 letters). Motion uses the
+ * separate translate/rotate/scale properties so it never fights with the
+ * glows and colours.
+ */
+
+.fx {
+  --fx-r1: none;
+  --fx-r2: none;
+  --fx-r3: none;
+  --fx-r4: none;
+  animation: var(--fx-r1), var(--fx-r2), var(--fx-r3), var(--fx-r4);
+}
+
+.fx .fx-w {
+  display: inline-block;
+  white-space: nowrap;
+  --fx-w1: none;
+  --fx-w3: none;
+  --fx-wd1: 0s;
+  --fx-wd3: 0s;
+  animation: var(--fx-w1), var(--fx-w3);
+  animation-delay: var(--fx-wd1), var(--fx-wd3);
+}
+
+.fx .fx-ch {
+  display: inline-block;
+  white-space: pre;
+  --fx-a1: none;
+  --fx-a2: none;
+  --fx-a3: none;
+  --fx-a4: none;
+  --fx-a5: none;
+  --fx-d1: 0s;
+  --fx-d2: 0s;
+  --fx-d3: 0s;
+  --fx-d4: 0s;
+  --fx-d5: 0s;
+  animation: var(--fx-a1), var(--fx-a2), var(--fx-a3), var(--fx-a4), var(--fx-a5);
+  animation-delay: var(--fx-d1), var(--fx-d2), var(--fx-d3), var(--fx-d4), var(--fx-d5);
+}
+
+/* Offscreen runs pause (TextFx.tsx watches them). */
+.fx.fx-off,
+.fx.fx-off * {
+  animation-play-state: paused !important;
+}
+
+.fx .emoji {
+  vertical-align: -0.2em;
+}
+
+/* ---------- Motion (slot 1) ---------- */
+
+.fx-wave .fx-ch {
+  --fx-a1: fx-wave 1.35s ease-in-out infinite;
+  --fx-d1: calc(var(--i) * -0.1s);
+}
+
+@keyframes fx-wave {
+  0%,
+  100% {
+    translate: 0 -0.15em;
+  }
+  50% {
+    translate: 0 0.15em;
+  }
+}
+
+.fx-wiggle .fx-ch {
+  transform-origin: 50% 70%;
+  --fx-a1: fx-wiggle 0.55s ease-in-out infinite;
+  --fx-d1: calc(var(--i) * -0.14s);
+}
+
+@keyframes fx-wiggle {
+  0%,
+  100% {
+    rotate: -10deg;
+  }
+  50% {
+    rotate: 10deg;
+  }
+}
+
+.fx-shake .fx-ch {
+  --fx-a1: fx-shake 0.24s linear infinite;
+  --fx-d1: calc(var(--r) * -0.24s);
+}
+
+@keyframes fx-shake {
+  0%,
+  100% {
+    translate: 0.05em -0.05em;
+  }
+  20% {
+    translate: -0.06em 0.04em;
+  }
+  40% {
+    translate: 0.05em 0.06em;
+  }
+  60% {
+    translate: -0.04em -0.06em;
+  }
+  80% {
+    translate: 0.06em 0.02em;
+  }
+}
+
+.fx-nervous .fx-w {
+  --fx-w1: fx-nervous 0.32s linear infinite;
+  --fx-wd1: calc(var(--w) * -0.13s);
+}
+
+@keyframes fx-nervous {
+  0%,
+  100% {
+    translate: 0.05em 0;
+  }
+  25% {
+    translate: 0 0.05em;
+  }
+  50% {
+    translate: -0.05em 0;
+  }
+  75% {
+    translate: 0 -0.05em;
+  }
+}
+
+.fx-bounce .fx-w {
+  --fx-w1: fx-bounce 1.2s infinite;
+  --fx-wd1: calc(var(--w) * 0.14s);
+}
+
+@keyframes fx-bounce {
+  0%,
+  45%,
+  100% {
+    translate: 0 0;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1);
+  }
+  20% {
+    translate: 0 -0.4em;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.7, 1);
+  }
+}
+
+.fx-float .fx-ch {
+  --fx-a1: fx-float 3.2s ease-in-out infinite;
+  --fx-d1: calc(var(--r) * -3.2s);
+}
+
+@keyframes fx-float {
+  0%,
+  100% {
+    translate: 0 0.1em;
+    rotate: -3deg;
+  }
+  50% {
+    translate: 0 -0.15em;
+    rotate: 3deg;
+  }
+}
+
+.fx-tipsy .fx-ch {
+  transform-origin: 50% 90%;
+  --fx-a1: fx-tipsy 2.4s ease-in-out infinite;
+  --fx-d1: calc(var(--i) * -0.33s);
+}
+
+@keyframes fx-tipsy {
+  0%,
+  100% {
+    rotate: -8deg;
+    translate: -0.04em 0.05em;
+  }
+  50% {
+    rotate: 7deg;
+    translate: 0.04em -0.06em;
+  }
+}
+
+.fx-heartbeat {
+  display: inline-block;
+  --fx-r1: fx-heartbeat 1.3s ease-in-out infinite;
+}
+
+@keyframes fx-heartbeat {
+  0%,
+  50%,
+  100% {
+    scale: 1;
+  }
+  12% {
+    scale: 1.17;
+  }
+  24% {
+    scale: 1;
+  }
+  36% {
+    scale: 1.1;
+  }
+}
+
+.fx-ripple .fx-ch {
+  transform-origin: 50% 85%;
+  --fx-a1: fx-ripple 2s ease-in-out infinite;
+  --fx-d1: calc(var(--i) * 0.07s);
+}
+
+@keyframes fx-ripple {
+  0%,
+  40%,
+  100% {
+    scale: 1;
+  }
+  20% {
+    scale: 1.35;
+  }
+}
+
+.fx-drip .fx-ch {
+  --fx-a1: fx-drip 2.8s ease-in infinite;
+  --fx-d1: calc(var(--r) * -2.8s);
+}
+
+@keyframes fx-drip {
+  0%,
+  45% {
+    translate: 0 0;
+    opacity: 1;
+  }
+  80% {
+    translate: 0 0.3em;
+    opacity: 0.25;
+  }
+  81% {
+    translate: 0 -0.1em;
+    opacity: 0;
+  }
+  100% {
+    translate: 0 0;
+    opacity: 1;
+  }
+}
+
+/* ---------- Light & magic (slot 2) ---------- */
+
+.fx-rainbow .fx-ch {
+  --fx-a2: fx-rainbow 2.4s linear infinite;
+  --fx-d2: calc(var(--i) * -0.1s);
+}
+
+@keyframes fx-rainbow {
+  0%,
+  100% {
+    color: #ff7b7b;
+  }
+  17% {
+    color: #ffb05c;
+  }
+  33% {
+    color: #ffe066;
+  }
+  50% {
+    color: #7ee08a;
+  }
+  67% {
+    color: #6cc0ff;
+  }
+  83% {
+    color: #b99cff;
+  }
+}
+
+.fx-sparkle .fx-ch {
+  --fx-a2: fx-sparkle 2.4s linear infinite;
+  --fx-d2: calc(var(--r) * -2.4s);
+}
+
+@keyframes fx-sparkle {
+  0%,
+  72%,
+  100% {
+    filter: brightness(1);
+    text-shadow: 0 0 0 transparent;
+  }
+  80% {
+    filter: brightness(2.1);
+    text-shadow:
+      0 0 0.25em rgba(255, 250, 225, 0.95),
+      0 0 0.6em rgba(255, 226, 140, 0.7);
+  }
+  88% {
+    filter: brightness(1.3);
+    text-shadow: 0 0 0.15em rgba(255, 250, 225, 0.5);
+  }
+}
+
+.fx-glow {
+  --fx-r2: fx-glow 2.6s ease-in-out infinite;
+}
+
+@keyframes fx-glow {
+  0%,
+  100% {
+    text-shadow: 0 0 0.2em color-mix(in srgb, currentColor 45%, transparent);
+  }
+  50% {
+    text-shadow:
+      0 0 0.3em currentColor,
+      0 0 0.9em color-mix(in srgb, currentColor 60%, transparent);
+  }
+}
+
+.fx-gold {
+  color: #e9bb4f;
+}
+
+.fx-gold .fx-ch {
+  --fx-a2: fx-gold 2.8s linear infinite;
+  --fx-d2: calc(var(--i) * 0.05s);
+}
+
+@keyframes fx-gold {
+  0%,
+  55%,
+  100% {
+    filter: brightness(1);
+    text-shadow: 0 0 0.12em rgba(233, 187, 79, 0.35);
+  }
+  64% {
+    filter: brightness(1.8);
+    text-shadow:
+      0 0 0.3em rgba(255, 235, 170, 0.95),
+      0 0 0.7em rgba(233, 187, 79, 0.6);
+  }
+  74% {
+    filter: brightness(1.05);
+  }
+}
+
+.fx-fire {
+  color: #ffa24c;
+}
+
+.fx-fire .fx-ch {
+  --fx-a2: fx-fire 0.9s linear infinite;
+  --fx-d2: calc(var(--r) * -0.9s);
+}
+
+@keyframes fx-fire {
+  0%,
+  100% {
+    color: #ffb347;
+    text-shadow:
+      0 -0.05em 0.25em #ff6a00,
+      0 0 0.5em rgba(255, 80, 0, 0.5);
+  }
+  25% {
+    color: #ffd873;
+    text-shadow:
+      0 -0.12em 0.35em #ff8c00,
+      0 0 0.6em rgba(255, 120, 0, 0.55);
+  }
+  50% {
+    color: #ff7b39;
+    text-shadow:
+      0 -0.05em 0.2em #ff4500,
+      0 0 0.4em rgba(255, 60, 0, 0.45);
+  }
+  75% {
+    color: #ffc15e;
+    text-shadow:
+      0 -0.15em 0.4em #ff7a00,
+      0 0 0.7em rgba(255, 110, 0, 0.55);
+  }
+}
+
+.fx-frost {
+  color: #a9e3ff;
+  text-shadow: 0 0 0.15em rgba(160, 220, 255, 0.45);
+}
+
+.fx-frost .fx-ch {
+  --fx-a2: fx-frost 3s linear infinite;
+  --fx-d2: calc(var(--i) * 0.06s);
+}
+
+@keyframes fx-frost {
+  0%,
+  58%,
+  100% {
+    filter: brightness(1);
+    text-shadow: 0 0 0.15em rgba(160, 220, 255, 0.45);
+  }
+  68% {
+    filter: brightness(1.45);
+    text-shadow:
+      0 0 0.3em #eaf8ff,
+      0 0 0.7em rgba(160, 220, 255, 0.85);
+  }
+}
+
+.fx-shadow {
+  color: #a79fcc;
+}
+
+.fx-shadow .fx-ch {
+  --fx-a2: fx-shadow 3.6s ease-in-out infinite;
+  --fx-d2: calc(var(--r) * -3.6s);
+}
+
+@keyframes fx-shadow {
+  0%,
+  100% {
+    text-shadow:
+      0 0 0.2em rgba(70, 20, 110, 0.95),
+      0 0 0.6em rgba(120, 40, 170, 0.55);
+    filter: blur(0);
+  }
+  50% {
+    text-shadow:
+      0.08em 0.03em 0.5em rgba(95, 30, 140, 1),
+      -0.06em -0.02em 0.8em rgba(35, 0, 60, 0.9);
+    filter: blur(0.35px);
+  }
+}
+
+.fx-ghost {
+  color: #d4dcf2;
+}
+
+.fx-ghost .fx-ch {
+  --fx-a2: fx-ghost 3.2s ease-in-out infinite;
+  --fx-d2: calc(var(--r) * -3.2s);
+}
+
+@keyframes fx-ghost {
+  0%,
+  100% {
+    opacity: 0.9;
+    filter: blur(0);
+    text-shadow: 0 0 0.3em rgba(200, 215, 255, 0.5);
+  }
+  50% {
+    opacity: 0.18;
+    filter: blur(1.2px);
+    text-shadow: 0 0 0.5em rgba(200, 215, 255, 0.2);
+  }
+}
+
+.fx-toxic {
+  color: #a6e36a;
+}
+
+.fx-toxic .fx-ch {
+  transform-origin: 50% 80%;
+  --fx-a2: fx-toxic 2s ease-in-out infinite;
+  --fx-d2: calc(var(--r) * -2s);
+}
+
+@keyframes fx-toxic {
+  0%,
+  65%,
+  100% {
+    scale: 1;
+    text-shadow: 0 0 0.2em rgba(120, 220, 60, 0.45);
+  }
+  78% {
+    scale: 1.2;
+    text-shadow: 0 0 0.4em rgba(170, 255, 100, 0.85);
+  }
+  90% {
+    scale: 0.95;
+  }
+}
+
+.fx-neon {
+  text-shadow:
+    0 0 0.08em #fff,
+    0 0 0.25em currentColor,
+    0 0 0.65em currentColor;
+  --fx-r2: fx-neon 4.5s linear infinite;
+}
+
+@keyframes fx-neon {
+  0%,
+  17%,
+  21%,
+  24%,
+  52%,
+  57%,
+  100% {
+    opacity: 1;
+  }
+  19%,
+  23%,
+  54% {
+    opacity: 0.35;
+  }
+}
+
+.fx-glitch .fx-ch {
+  --fx-a2: fx-glitch 2.8s linear infinite;
+  --fx-d2: calc(var(--r) * -2.8s);
+}
+
+@keyframes fx-glitch {
+  0%,
+  85%,
+  92%,
+  100% {
+    text-shadow: 0 0 0 transparent;
+    opacity: 1;
+  }
+  87% {
+    text-shadow:
+      -0.07em 0 #ff2a6d,
+      0.07em 0 #05d9e8;
+  }
+  89% {
+    text-shadow:
+      0.06em 0.02em #ff2a6d,
+      -0.06em -0.02em #05d9e8;
+    opacity: 0.7;
+  }
+  91% {
+    text-shadow: -0.03em 0 #05d9e8;
+  }
+}
+
+.fx-storm {
+  color: #a9bdf0;
+  --fx-r2: fx-storm 3.6s linear infinite;
+}
+
+@keyframes fx-storm {
+  0%,
+  88%,
+  92%,
+  95%,
+  100% {
+    text-shadow: 0 0 0.15em rgba(120, 160, 255, 0.35);
+    filter: brightness(1);
+  }
+  89%,
+  94% {
+    text-shadow:
+      0 0 0.25em #e3ecff,
+      0 0 0.8em #7aa2ff,
+      0 0 1.4em rgba(122, 162, 255, 0.6);
+    filter: brightness(1.9);
+  }
+}
+
+/* ---------- Voice (slot 4 / whole) ---------- */
+
+.fx-whisper {
+  font-size: 0.86em;
+  opacity: 0.68;
+  letter-spacing: 0.02em;
+}
+
+.fx-shout {
+  display: inline-block;
+  font-weight: 800;
+  font-size: 1.16em;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  --fx-r4: fx-shout 0.2s linear infinite;
+}
+
+@keyframes fx-shout {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  25% {
+    translate: 0.02em -0.02em;
+  }
+  50% {
+    translate: -0.02em 0.02em;
+  }
+  75% {
+    translate: 0.02em 0.02em;
+  }
+}
+
+.fx-echo {
+  --fx-r4: fx-echo 1.8s ease-out infinite;
+}
+
+@keyframes fx-echo {
+  0% {
+    text-shadow:
+      0 0 0 color-mix(in srgb, currentColor 55%, transparent),
+      0 0 0 color-mix(in srgb, currentColor 30%, transparent);
+  }
+  100% {
+    text-shadow:
+      0.3em 0 0.08em transparent,
+      0.6em 0 0.12em transparent;
+  }
+}
+
+.fx-telepathy {
+  color: #caa9ff;
+}
+
+.fx-telepathy .fx-ch {
+  --fx-a4: fx-telepathy 2.4s ease-in-out infinite;
+  --fx-d4: calc(var(--i) * -0.12s);
+}
+
+@keyframes fx-telepathy {
+  0%,
+  100% {
+    opacity: 1;
+    text-shadow: 0 0 0.25em rgba(180, 120, 255, 0.7);
+  }
+  50% {
+    opacity: 0.5;
+    text-shadow:
+      0 0 0.5em rgba(205, 160, 255, 0.95),
+      0 0 1em rgba(140, 80, 255, 0.5);
+  }
+}
+
+.fx-demonic {
+  display: inline-block;
+  color: #e0584f;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-shadow:
+    0 0.04em 0 #3a0605,
+    0 0 0.35em rgba(200, 20, 10, 0.55);
+  --fx-r4: fx-demonic 0.14s linear infinite;
+}
+
+@keyframes fx-demonic {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  33% {
+    translate: 0.015em 0.02em;
+  }
+  66% {
+    translate: -0.015em 0.01em;
+  }
+}
+
+/* ---------- Letters (slot 5 and letter swaps) ---------- */
+
+/* Two things stacked in one letter's place (runes, hearts, decode, censor). */
+.fx .fx-layered {
+  display: inline-grid;
+}
+
+.fx .fx-layered > * {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+
+.fx-runes {
+  cursor: help;
+}
+
+.fx-rune-g {
+  font-family: 'Noto Sans Runic', 'Segoe UI Historic', 'Segoe UI Symbol', serif;
+  opacity: 1;
+  user-select: none;
+  transition: opacity 0.25s calc(var(--i) * 25ms);
+}
+
+.fx-rune-r {
+  opacity: 0;
+  transition: opacity 0.25s calc(var(--i) * 25ms);
+}
+
+.fx-runes:hover .fx-rune-g,
+.fx-runes.fx-open .fx-rune-g {
+  opacity: 0;
+}
+
+.fx-runes:hover .fx-rune-r,
+.fx-runes.fx-open .fx-rune-r {
+  opacity: 1;
+}
+
+.fx-redacted {
+  cursor: pointer;
+}
+
+.fx-redacted .fx-ch,
+.fx-redacted .fx-w {
+  transition:
+    background-color 0.18s calc(var(--i, 0) * 12ms),
+    color 0.18s calc(var(--i, 0) * 12ms);
+}
+
+.fx-redacted:not(.fx-open) .fx-ch {
+  color: transparent !important;
+  text-shadow: none !important;
+  background: #05070c;
+  border-radius: 2px;
+  box-shadow: 0 0 0 0.03em #05070c;
+}
+
+.fx-redacted:not(.fx-open) .fx-ch .emoji {
+  opacity: 0;
+}
+
+.fx-cg {
+  user-select: none;
+}
+
+.fx-censor .fx-layered .fx-cl {
+  visibility: hidden;
+}
+
+.fx-cg::after {
+  content: '#';
+  color: #f47b7b;
+  animation: fx-cuss 0.9s steps(1) infinite;
+  animation-delay: calc(var(--r) * -0.9s);
+}
+
+@keyframes fx-cuss {
+  0% {
+    content: '#';
+  }
+  14% {
+    content: '$';
+  }
+  28% {
+    content: '%';
+  }
+  42% {
+    content: '&';
+  }
+  57% {
+    content: '@';
+  }
+  71% {
+    content: '!';
+  }
+  85% {
+    content: '*';
+  }
+}
+
+.fx-hearts {
+  color: #ffa3c8;
+}
+
+.fx-hearts .fx-ch {
+  --fx-a5: fx-hearts 2.2s ease-in-out infinite;
+  --fx-d5: calc(var(--i) * 0.07s);
+}
+
+@keyframes fx-hearts {
+  0%,
+  34%,
+  100% {
+    translate: 0 0;
+    text-shadow: 0 0 0 transparent;
+  }
+  17% {
+    translate: 0 -0.28em;
+    text-shadow: 0 0 0.35em rgba(255, 110, 170, 0.8);
+  }
+}
+
+.fx-h-g {
+  color: #ff5c9d;
+  opacity: 0;
+  user-select: none;
+  animation: fx-heart-in 2.2s linear infinite;
+  animation-delay: calc(var(--i) * 0.07s);
+}
+
+.fx-h-l {
+  animation: fx-heart-out 2.2s linear infinite;
+  animation-delay: calc(var(--i) * 0.07s);
+}
+
+@keyframes fx-heart-in {
+  0%,
+  8%,
+  28%,
+  100% {
+    opacity: 0;
+  }
+  11%,
+  24% {
+    opacity: 1;
+  }
+}
+
+@keyframes fx-heart-out {
+  0%,
+  8%,
+  28%,
+  100% {
+    opacity: 1;
+  }
+  11%,
+  24% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Entrances (slot 3; only while .fx-play) ---------- */
+
+.fx-play.fx-typewriter .fx-ch {
+  --fx-a3: fx-type calc(var(--fx-step) * 2) linear backwards;
+  --fx-d3: calc(var(--i) * var(--fx-step));
+}
+
+.fx-play.fx-typewriter .fx-ch.fx-last {
+  --fx-a3: fx-type-last calc(var(--fx-step) + 1.6s) linear backwards;
+}
+
+@keyframes fx-type {
+  0% {
+    opacity: 0;
+  }
+  1%,
+  50% {
+    opacity: 1;
+    box-shadow: 0.08em 0 0 -0.02em currentColor;
+  }
+  51%,
+  100% {
+    opacity: 1;
+    box-shadow: none;
+  }
+}
+
+@keyframes fx-type-last {
+  0% {
+    opacity: 0;
+  }
+  1%,
+  20%,
+  45%,
+  70% {
+    opacity: 1;
+    box-shadow: 0.08em 0 0 -0.02em currentColor;
+  }
+  32%,
+  58%,
+  82%,
+  100% {
+    opacity: 1;
+    box-shadow: none;
+  }
+}
+
+.fx-play.fx-decode .fx-ch {
+  --fx-settle: calc(0.35s + var(--i) * var(--fx-step) * 1.4);
+}
+
+.fx-play.fx-decode .fx-dl {
+  animation: fx-decode-letter var(--fx-settle) steps(1, end) backwards;
+}
+
+.fx-dg {
+  visibility: hidden;
+  user-select: none;
+}
+
+.fx-play.fx-decode .fx-dg {
+  visibility: visible;
+  animation: fx-decode-glyph var(--fx-settle) steps(1, end) forwards;
+}
+
+.fx-play.fx-decode .fx-dg::after {
+  content: '#';
+  color: #7ee0a0;
+  animation: fx-scramble 0.42s steps(1) infinite;
+  animation-delay: calc(var(--r) * -0.42s);
+}
+
+@keyframes fx-decode-letter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fx-decode-glyph {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes fx-scramble {
+  0% {
+    content: '#';
+  }
+  12% {
+    content: '%';
+  }
+  25% {
+    content: '&';
+  }
+  37% {
+    content: '7';
+  }
+  50% {
+    content: '@';
+  }
+  62% {
+    content: '∆';
+  }
+  75% {
+    content: '§';
+  }
+  87% {
+    content: '0';
+  }
+}
+
+.fx-play.fx-materialize .fx-ch {
+  --fx-a3: fx-materialize 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  --fx-d3: calc(var(--r) * 0.45s + var(--i) * 10ms);
+}
+
+@keyframes fx-materialize {
+  from {
+    opacity: 0;
+    translate: var(--dx) var(--dy);
+    scale: 1.7;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+    filter: blur(0);
+  }
+}
+
+.fx-play.fx-unfold .fx-w {
+  --fx-w3: fx-unfold 0.65s ease-out backwards;
+  --fx-wd3: calc(var(--w) * 0.16s);
+}
+
+@keyframes fx-unfold {
+  from {
+    opacity: 0;
+    translate: 0 0.35em;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    filter: blur(0);
+  }
+}
+
+.fx-play.fx-slam {
+  display: inline-block;
+  --fx-r3: fx-slam 0.75s ease-out backwards;
+}
+
+@keyframes fx-slam {
+  0% {
+    scale: 3.2;
+    opacity: 0;
+    filter: blur(4px);
+  }
+  55% {
+    scale: 0.92;
+    opacity: 1;
+    filter: blur(0);
+  }
+  65% {
+    scale: 1.05;
+    translate: 0.05em 0;
+  }
+  72% {
+    translate: -0.06em 0.02em;
+  }
+  80% {
+    translate: 0.03em -0.02em;
+    scale: 1;
+  }
+  100% {
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+/* Replaying an entrance: the text can be clicked. */
+.fx-replayable {
+  cursor: pointer;
+}
+
+/* ---------- Still (setting off, or the system asks for less motion) ---------- */
+
+body.fx-still .fx,
+body.fx-still .fx *,
+body.fx-still .fx *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx,
+  .fx *,
+  .fx *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* A still frame that still says what the effect is. */
+body.fx-still .fx-rainbow .fx-ch {
+  color: hsl(calc(var(--i) * 32deg) 85% 72%);
+}
+
+body.fx-still .fx-glow {
+  text-shadow: 0 0 0.3em color-mix(in srgb, currentColor 60%, transparent);
+}
+
+body.fx-still .fx-fire .fx-ch {
+  text-shadow: 0 -0.08em 0.3em #ff6a00;
+}
+
+body.fx-still .fx-shadow .fx-ch {
+  text-shadow: 0 0 0.3em rgba(95, 30, 140, 1);
+}
+
+body.fx-still .fx-ghost .fx-ch {
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-rainbow .fx-ch {
+    color: hsl(calc(var(--i) * 32deg) 85% 72%);
+  }
+}
+
+/* ---------- In the message box: a live preview that keeps typing normal ---------- */
+/* Letters there stay inline (so lines wrap as usual): movement uses top/left
+   instead of transforms, and letter swaps (runes, uwu...) show as typed. */
+
+.composer-editor .fx .fx-ch {
+  display: inline;
+  position: relative;
+  white-space: inherit;
+}
+
+.composer-editor .fx-play,
+.composer-editor .fx .fx-ch {
+  --fx-a3: none !important;
+}
+
+.composer-editor .fx-wave .fx-ch {
+  --fx-a1: fx-e-wave 1.35s ease-in-out infinite;
+}
+
+.composer-editor .fx-float .fx-ch,
+.composer-editor .fx-tipsy .fx-ch,
+.composer-editor .fx-ripple .fx-ch {
+  --fx-a1: fx-e-wave 3s ease-in-out infinite;
+  --fx-d1: calc(var(--r) * -3s);
+}
+
+.composer-editor .fx-drip .fx-ch {
+  --fx-a1: fx-e-drip 2.8s ease-in infinite;
+}
+
+.composer-editor .fx-wiggle .fx-ch,
+.composer-editor .fx-shake .fx-ch,
+.composer-editor .fx-nervous .fx-ch,
+.composer-editor .fx-bounce .fx-ch {
+  --fx-a1: fx-e-shake 0.3s linear infinite;
+  --fx-d1: calc(var(--r) * -0.3s);
+}
+
+.composer-editor .fx-heartbeat,
+.composer-editor .fx-shout,
+.composer-editor .fx-demonic {
+  display: inline;
+  --fx-r1: none;
+  --fx-r4: none;
+}
+
+.composer-editor .fx-toxic .fx-ch {
+  --fx-a2: fx-e-glow-green 2s ease-in-out infinite;
+}
+
+.composer-editor .fx-hearts .fx-ch {
+  --fx-a5: fx-e-wave 2.2s ease-in-out infinite;
+}
+
+.composer-editor .fx-redacted {
+  background: rgba(5, 7, 12, 0.8);
+  border-radius: 3px;
+  color: var(--text-muted);
+}
+
+.composer-editor .fx-runes,
+.composer-editor .fx-censor,
+.composer-editor .fx-mock,
+.composer-editor .fx-uwu,
+.composer-editor .fx-leet,
+.composer-editor .fx-typewriter,
+.composer-editor .fx-decode,
+.composer-editor .fx-materialize,
+.composer-editor .fx-unfold,
+.composer-editor .fx-slam {
+  text-decoration: underline dotted color-mix(in srgb, var(--brand) 70%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+@keyframes fx-e-wave {
+  0%,
+  100% {
+    top: -0.12em;
+  }
+  50% {
+    top: 0.12em;
+  }
+}
+
+@keyframes fx-e-drip {
+  0%,
+  45% {
+    top: 0;
+    opacity: 1;
+  }
+  80% {
+    top: 0.25em;
+    opacity: 0.3;
+  }
+  81% {
+    top: -0.08em;
+    opacity: 0;
+  }
+  100% {
+    top: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes fx-e-shake {
+  0%,
+  100% {
+    left: 0.04em;
+    top: -0.03em;
+  }
+  33% {
+    left: -0.05em;
+    top: 0.03em;
+  }
+  66% {
+    left: 0.03em;
+    top: 0.04em;
+  }
+}
+
+@keyframes fx-e-glow-green {
+  0%,
+  100% {
+    text-shadow: 0 0 0.2em rgba(120, 220, 60, 0.45);
+  }
+  50% {
+    text-shadow: 0 0 0.4em rgba(170, 255, 100, 0.85);
+  }
+}

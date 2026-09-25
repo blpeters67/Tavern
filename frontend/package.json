@@ -1,0 +1,51 @@
+{
+  "name": "tavern-frontend",
+  "private": true,
+  "version": "2.3.0",
+  "type": "module",
+  "scripts": {
+    "emoji": "node scripts/build-emoji.mjs",
+    "predev": "node scripts/build-emoji.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/build-emoji.mjs",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/cinzel": "^5.3.0",
+    "@fontsource/eb-garamond": "^5.3.0",
+    "@fontsource/noto-sans-runic": "5.3.0",
+    "@fontsource/source-code-pro": "^5.3.0",
+    "@khanacademy/simple-markdown": "^3.0.1",
+    "@mdi/js": "^7.4.47",
+    "@sapphi-red/web-noise-suppressor": "0.4.1",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-text-style": "^3.31.3",
+    "@tiptap/extensions": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
+    "emoji-regex": "^11.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@twemoji/svg": "^15.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "emojibase-data": "^17.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.0"
+  },
+  "overrides": {
+    "@khanacademy/simple-markdown": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
+  }
+}

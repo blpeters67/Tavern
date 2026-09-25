@@ -1,0 +1,663 @@
+/* Theater: the "Now Showing" card, the screen (docked, floating, big, full
+   screen), picture-in-picture, and the queue/library window's video rows.
+   The card borrows the jukebox card's pieces (jukebox.css). */
+
+/* ---------- Card ---------- */
+
+/* Edge to edge in the card, like a screen. The wrapper is a size container so
+   the screen's height can follow its width (100cqw) without the width
+   stretching to keep an aspect ratio. */
+.th-screen-wrap {
+  margin: 0 -12px 10px;
+  container-type: inline-size;
+}
+
+.theater-card .th-screen {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--text-faint);
+}
+
+/* YouTube's embedded player must be at least 200 × 200 pixels. */
+.th-screen.youtube {
+  height: max(200px, calc(100cqw * 9 / 16));
+}
+
+/* Uploads take their own shape (--ar = width / height), within reason. */
+.th-screen.file {
+  height: clamp(120px, calc(100cqw / var(--ar, 1.7778)), 320px);
+}
+
+.th-screen.poster img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.6;
+}
+
+.th-screen.poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+.th-take-seat {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  background: rgba(8, 12, 22, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(224, 178, 82, 0.6),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+  color: var(--gold-bright);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.th-take-seat:hover {
+  background: var(--gold);
+  color: #1b1404;
+  transform: scale(1.03);
+}
+
+.th-away {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.th-now {
+  min-width: 0;
+}
+
+.th-now-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  font-size: 14.5px;
+  line-height: 19px;
+  font-weight: 600;
+  color: var(--header-primary);
+}
+
+.th-now-sub {
+  margin-top: 1px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.th-live {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 16px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--red-btn);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+.th-progress {
+  margin-top: 8px;
+}
+
+/* Things only about my screen */
+.th-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 2px 0 8px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: var(--bg-mod-hover);
+  box-shadow: inset 0 0 0 1px var(--divider);
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--text-normal);
+}
+
+.th-status.error {
+  background: rgba(239, 79, 79, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(239, 79, 79, 0.28);
+  color: var(--text-danger);
+}
+
+.th-status.error > svg {
+  flex-shrink: 0;
+}
+
+.th-status-text {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.th-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--bg-mod-active);
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.th-status-btn:hover {
+  background: var(--bg-mod-strong);
+}
+
+.th-status-btn.gold {
+  background: var(--gold);
+  color: #1b1404;
+}
+
+.th-status-btn.gold:hover {
+  background: var(--gold-bright);
+}
+
+.th-gesture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.th-volume {
+  margin-top: 2px;
+}
+
+.th-mute {
+  flex-shrink: 0;
+  display: flex;
+  margin: -3px;
+  padding: 3px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.th-mute:hover {
+  background: var(--bg-mod-hover);
+  color: var(--interactive-hover);
+}
+
+.th-seat {
+  white-space: nowrap;
+}
+
+.th-audience {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.th-views {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.jb-btn.th-view {
+  width: 28px;
+  height: 28px;
+}
+
+.th-thumb {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  box-shadow: inset 0 0 0 1px var(--divider);
+  color: var(--text-faint);
+}
+
+.th-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.th-thumb-yt {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  color: #fff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+
+/* ---------- The screen ---------- */
+
+.th-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1399;
+  background: rgba(3, 6, 12, 0.86);
+  animation: fade-in 0.15s ease-out;
+}
+
+.th-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  /* Under the full-screen layers (they cover the card, and the screen floats above them instead). */
+  z-index: 70;
+}
+
+.th-host.mode-hidden,
+.th-host.mode-pip {
+  display: none;
+}
+
+.th-host.mode-floating {
+  z-index: 1500;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 14px 36px rgba(0, 0, 0, 0.55);
+}
+
+.th-host.mode-expanded {
+  z-index: 1400;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.th-host:fullscreen {
+  border-radius: 0;
+}
+
+.th-host-media {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+}
+
+.th-host.dragging .th-host-media {
+  pointer-events: none;
+}
+
+.th-media,
+.th-frame,
+.th-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.th-video {
+  object-fit: contain;
+  background: #000;
+}
+
+/* Bars sit beside the picture, never over it (YouTube's rules). */
+.th-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-floating);
+  color: var(--text-normal);
+}
+
+.th-float-bar {
+  order: -1;
+  height: 30px;
+  padding: 0 4px 0 2px;
+  border-bottom: 1px solid var(--divider);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.th-host.dragging .th-float-bar {
+  cursor: grabbing;
+}
+
+.th-grip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.th-grip svg {
+  transform: rotate(180deg);
+}
+
+.th-grip:hover {
+  background: var(--bg-mod-hover);
+  color: var(--text-muted);
+}
+
+.th-bar-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--header-secondary);
+}
+
+.th-bar-spacer {
+  flex: 1;
+}
+
+.th-bar-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--interactive-normal);
+  cursor: pointer;
+}
+
+.th-bar-btn:hover {
+  background: var(--bg-mod-active);
+  color: var(--interactive-hover);
+}
+
+.th-bar-btn.play {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--header-primary);
+  color: #0b1220;
+}
+
+.th-bar-btn.play:hover {
+  background: #fff;
+  color: #0b1220;
+}
+
+.th-chip {
+  flex-shrink: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-radius: 11px;
+  background: var(--bg-mod-strong);
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.th-chip:hover {
+  background: var(--bg-accent);
+}
+
+.th-chip.gold {
+  background: var(--gold);
+  color: #1b1404;
+}
+
+.th-chip.gold:hover {
+  background: var(--gold-bright);
+}
+
+.th-chip.error {
+  background: rgba(239, 79, 79, 0.18);
+  color: var(--text-danger);
+}
+
+/* The big screen's bar */
+.th-big-bar {
+  gap: 14px;
+  min-height: 58px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.th-big-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.th-big-controls .th-bar-btn:not(.play) {
+  width: 32px;
+  height: 32px;
+}
+
+.th-big-middle {
+  flex: 1;
+  min-width: 0;
+}
+
+.th-big-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.th-big-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--header-primary);
+}
+
+.th-big-times {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.th-big-middle .th-progress {
+  margin-top: 3px;
+}
+
+.th-big-middle .jb-times {
+  display: none;
+}
+
+.th-big-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.th-big-right .th-bar-btn {
+  width: 32px;
+  height: 32px;
+}
+
+.slider.th-big-volume {
+  width: 96px;
+}
+
+.th-host.is-fullscreen .th-big-bar,
+.th-host.is-fullscreen .th-float-bar {
+  background: #05080f;
+}
+
+@media (max-width: 600px) {
+  .th-big-bar {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 6px 10px;
+  }
+
+  .th-big-middle {
+    order: -1;
+    flex: 1 1 100%;
+  }
+
+  .th-big-right {
+    margin-left: auto;
+  }
+
+  .slider.th-big-volume {
+    width: 72px;
+  }
+}
+
+/* ---------- Picture-in-picture window ---------- */
+
+.thp-body {
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.thp {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.thp-media {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.thp-bar {
+  height: 44px;
+  gap: 6px;
+  padding: 0 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.thp-bar .th-bar-btn.play {
+  width: 30px;
+  height: 30px;
+}
+
+.thp-middle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slider.thp-volume {
+  width: 72px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 300px) {
+  .slider.thp-volume {
+    display: none;
+  }
+}
+
+/* ---------- Queue & library rows ---------- */
+
+.th-row .jw-track-title {
+  gap: 4px;
+}
+
+.th-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.theater-window .jw-add {
+  gap: 10px;
+}
+
+.theater-window .jw-import .btn {
+  flex-shrink: 0;
+}
+
+.th-upload-note {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 640px) {
+  .theater-window .jw-import {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 6px 6px 6px 10px;
+  }
+
+  .theater-window .jw-import input {
+    flex: 1 1 calc(100% - 30px);
+    height: 28px;
+  }
+}
