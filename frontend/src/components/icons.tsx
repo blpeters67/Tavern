@@ -52,6 +52,7 @@ export {
   mdiCreation,
   mdiCrown,
   mdiCrownOutline,
+  mdiCursorDefault,
   mdiDelete,
   mdiDiceD10,
   mdiDiceD12,

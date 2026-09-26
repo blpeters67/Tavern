@@ -23,6 +23,7 @@ import './styles/effects.css';
 import './styles/voice.css';
 import './styles/jukebox.css';
 import './styles/theater.css';
+import './styles/board.css';
 import './styles/sheet.css';
 import './styles/dice.css';
 import './styles/community.css';

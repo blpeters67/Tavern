@@ -571,7 +571,7 @@ export default function UserSettings({ section }: { section?: string }) {
       onSelect={setActive}
       footer={
         <span className="settings-version">
-          <TavernLogo size={14} /> Tavern 2.5.0
+          <TavernLogo size={14} /> Tavern 2.6.0
         </span>
       }
     >

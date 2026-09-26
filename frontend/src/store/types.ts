@@ -150,6 +150,7 @@ export interface ServerPayload extends Server {
   voice_states?: VoiceState[];
   jukebox?: JukeboxState;
   theater?: TheaterState;
+  board?: ServerBoard;
   users?: User[];
   characters?: Character[];
 }
@@ -273,6 +274,75 @@ export interface TheaterState {
   server_now: number;
   /** Who has taken a seat. */
   listeners: number[];
+}
+
+// ---------------------------------------------------------------------------
+// Game board
+// ---------------------------------------------------------------------------
+
+/** The ring colours: ally is green, enemy is red, everything else is grey. */
+export type Disposition = 'ally' | 'neutral' | 'enemy';
+
+export interface BoardToken {
+  id: number;
+  board_id: number;
+  /** A player character's token (wears the character's picture and hit points)… */
+  character_id: number | null;
+  name: string;
+  avatar: string | null;
+  /** The middle of the token, in board units. */
+  x: number;
+  y: number;
+  disposition: Disposition;
+  /** How many grid squares wide the token is. */
+  size: number;
+  owner_id: number | null;
+  /** Free tokens carry their own hit points; character tokens show the sheet's. */
+  hp: { current: number; max: number } | null;
+}
+
+export interface BoardDrawing {
+  id: number;
+  board_id: number;
+  kind: 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text';
+  color: string;
+  width: number;
+  data:
+    | { points: [number, number][] }
+    | { from: [number, number]; to: [number, number] }
+    | { at: [number, number]; text: string; size: number };
+  author_id: number | null;
+}
+
+export interface TrackerEntry {
+  id: string;
+  name: string;
+  token_id?: number | null;
+  current?: boolean;
+  initiative?: number | string;
+}
+
+export interface Board {
+  id: number;
+  name: string;
+  background_url: string | null;
+  bg_width: number | null;
+  bg_height: number | null;
+  grid_size: number;
+  snap: boolean;
+  tokens: BoardToken[];
+  drawings: BoardDrawing[];
+  tracker: TrackerEntry[];
+  rev: number;
+}
+
+/** Everything about a server's boards: the list, the active one, who has it open. */
+export interface ServerBoard {
+  server_id: number;
+  boards: { id: number; name: string }[];
+  active_id: number | null;
+  board: Board | null;
+  viewers: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +524,7 @@ export interface ReadyPayload {
   characters: Character[];
   read_states: ReadState[];
   personas?: { channel_id: number; user_id: number; character_id: number }[];
-  limits?: { max_upload_mb: number };
+  limits?: { max_upload_mb: number; board_max_mb?: number };
 }
 
 export interface InviteInfo {

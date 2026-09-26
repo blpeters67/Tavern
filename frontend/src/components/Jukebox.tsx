@@ -118,7 +118,7 @@ function Progress({ serverId, st, canControl }: { serverId: number; st: JukeboxS
 }
 
 /** The eye at the top of a card: open shows everything, closed folds it down to one line. */
-export function CardEye({ name, label }: { name: 'jukebox' | 'theater'; label: string }) {
+export function CardEye({ name, label }: { name: 'jukebox' | 'theater' | 'board'; label: string }) {
   const collapsed = useCollapsed(name);
   return (
     <button

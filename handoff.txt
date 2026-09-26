@@ -75,6 +75,7 @@ backend/tavern/
   jukebox.py       Music library, ffmpeg processing (loudness gain, covers), yt-dlp imports,
                    YouTube search.
   theater.py       Video library: YouTube lookups (no downloads), uploads converted by ffmpeg.
+  board.py         The game board: saved boards (one active), tokens, drawings, live sync.
   spotify.py       Spotify Web API (song names only) and matching the songs on YouTube.
   dice.py          Dice notation, server-side rolling, sheet-aware checks.
   sheets.py        D&D 5e sheet schema (clean, merge_patch) and maths.
@@ -307,6 +308,25 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 - TRUST_PROXY_HEADERS reads the visitor's IP from Cloudflare's headers. Rate limits key on
   it.
 
+4.11 The game board
+- board.py is small: a Board row per saved board (name, grid_size default 70, snap, the
+  background picture and its pixel size), BoardToken rows (x/y in board units, size,
+  disposition ally/neutral/enemy, an optional uploaded avatar, hp current/max, or a
+  character_id) and BoardDrawing rows for the drawing tools. servers.active_board_id is a
+  plain integer, not a foreign key, so models.py stays free of cycles.
+- routes/boards.py is the HTTP API under /api/servers/{id}/board: boards (list/create/rename/
+  activate/delete), the background (upload/replace/remove; its own CDN bucket "boards", size
+  cap BOARD_MAX_MB, 64 MB by default), tokens (place/move/edit/remove, avatars) and drawings.
+- A token with a character_id takes its name and hit points from that character's sheet at
+  read time (serializers.tokens_payload); a free token carries its own. The DM (the same
+  check as the jukebox) may touch any token, players only their own characters'; adding free
+  tokens is DM-only.
+- Changes publish like the jukebox: BOARD_STATE, BOARD_TOKEN_CREATE/UPDATE/DELETE,
+  BOARD_DRAW_ADD/DELETE, BOARD_DRAWS_CLEAR, BOARD_VIEWERS. READY carries
+  {boards, active_id, board, viewers}. Op 12 is "I have the game board open"
+  (viewing: true) and drives the viewers list; leaving drops you from it.
+
+
 ==========================================================================================
 5. FRONTEND
 ==========================================================================================
@@ -453,6 +473,18 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   * Browsers block sound until the person interacts with the page, so someone who opens
     Tavern already seated sees the video muted with "Click for sound".
 
+5.9 The game board in the browser
+- components/GameBoard.tsx holds the whole feature: BoardCard (the right-panel card with its
+  live mini preview and who has it open), BoardRoom (the board in the middle with the
+  channel's real ChatView beside it), the DM's token palette and the small modals;
+  styles/board.css styles it; the BOARD_* handlers live in store.ts.
+- The board is one transformed div (translate + scale); panning and wheel-zoom only change
+  it. Dragging a token uses pointer capture, patches the position at most every 140 ms and
+  snaps to the square middle on drop. dragstart is prevented on tokens and the stage: a
+  native drag cancels the pointer sequence, which killed drags half-way.
+- Escape closes the board only when no modal, sheet or context menu is up (they close first).
+
+
 ==========================================================================================
 6. NAMES THAT MEAN SOMETHING ELSE
 ==========================================================================================
@@ -552,4 +584,5 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   per-message render isolation (5.4).
 - Schema changes are forward-only and automatic, with no downgrade. Back up data/ before
   anything risky (README, Backups).
-- Not built yet: a light theme, maps and initiative trackers.
+- Not built yet: a light theme; on the game board, drawing on the map, rolling dice onto it
+  and the initiative tracker.

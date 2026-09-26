@@ -1,0 +1,715 @@
+/* The game board: the shared battle map, its rail card, and the chat beside it.
+   (Palette tokens come from base.css.) */
+
+/* The whole room covers the app; the theater/jukebox windows and modals still
+   open above it. */
+
+.board-room {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  background: var(--bg-tertiary);
+}
+
+.board-shell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Top bar ---------- */
+
+.board-top {
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--divider);
+}
+
+.board-title-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.board-title-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--header-primary);
+  font-family: var(--font-title);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  max-width: 340px;
+}
+
+.board-title-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-title-button:hover {
+  background: var(--bg-mod-hover);
+}
+
+.board-title-plain {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  color: var(--header-primary);
+  font-family: var(--font-title);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.board-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+}
+
+.board-top-spacer {
+  flex: 1;
+}
+
+.board-uploading {
+  font-size: 12.5px;
+  color: var(--gold-bright);
+  white-space: nowrap;
+}
+
+.board-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.board-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--interactive-normal);
+  cursor: pointer;
+}
+
+.board-icon-btn:hover {
+  background: var(--bg-mod-hover);
+  color: var(--interactive-hover);
+}
+
+.board-icon-btn.on {
+  color: var(--gold-bright);
+}
+
+.board-zoom-slider {
+  width: 110px;
+  accent-color: var(--brand);
+}
+
+.board-zoom-pct {
+  width: 42px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-viewers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
+/* ---------- Stage ---------- */
+
+.board-stage-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.board-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(1200px 700px at 50% 20%, rgba(128, 152, 204, 0.05), transparent 70%),
+    var(--bg-tertiary);
+}
+
+.board-stage:active {
+  cursor: grabbing;
+}
+
+.board-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  background: var(--bg-secondary-alt);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    var(--shadow-high);
+}
+
+.board-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.board-bg-plain {
+  background: linear-gradient(160deg, #11203a, #0a1322 60%);
+}
+
+.board-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(to right, var(--divider-strong) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--divider-strong) 1px, transparent 1px);
+}
+
+/* ---------- Tokens ---------- */
+
+.board-token {
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  will-change: transform;
+}
+
+.board-token * {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.board-token.editable {
+  cursor: grab;
+}
+
+.board-token.dragging {
+  cursor: grabbing;
+  z-index: 5;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+}
+
+.board-token.ally {
+  --tone: var(--green);
+}
+
+.board-token.neutral {
+  --tone: #93a3bd;
+}
+
+.board-token.enemy {
+  --tone: var(--red);
+}
+
+.board-token-ring {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg-floating);
+  box-shadow:
+    0 0 0 3px var(--tone, var(--text-muted)),
+    0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+.board-token-ring img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.board-token-letter {
+  font-family: var(--font-title);
+  color: var(--gold-bright);
+  line-height: 1;
+}
+
+.board-token-hp {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+.board-token-hp span {
+  display: block;
+  height: 100%;
+}
+
+.board-token-hp.good span {
+  background: var(--green);
+}
+
+.board-token-hp.mid span {
+  background: var(--yellow);
+}
+
+.board-token-hp.low span {
+  background: var(--red);
+}
+
+.board-token-name {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 3px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--header-primary);
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* With an HP bar under the token, the name sits below it instead. */
+.board-token:has(.board-token-hp) .board-token-name {
+  top: calc(100% + 12px);
+}
+
+/* ---------- Tools and the token tray ---------- */
+
+.board-tools {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-floating) 85%, transparent);
+  box-shadow: var(--shadow-high);
+  backdrop-filter: blur(6px);
+}
+
+.board-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--interactive-normal);
+  cursor: pointer;
+}
+
+.board-tool:hover {
+  background: var(--bg-mod-hover);
+  color: var(--interactive-hover);
+}
+
+.board-tool.active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.board-tray {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  max-width: min(80%, 720px);
+  padding: 7px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-floating) 88%, transparent);
+  box-shadow: var(--shadow-high);
+  backdrop-filter: blur(6px);
+}
+
+.board-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 180px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--bg-mod-hover);
+  color: var(--text-normal);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.board-chip img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.board-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-chip:hover {
+  background: var(--bg-mod-active);
+}
+
+.board-chip-add {
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  color: var(--brand-text);
+}
+
+.board-tray-quiet {
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* ---------- The chat column ---------- */
+
+.board-chat {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  min-height: 0;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--divider);
+}
+
+.board-chat-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.board-chat-inner > .chat {
+  flex: 1;
+  min-height: 0;
+}
+
+.board-chat-empty {
+  margin: auto;
+  padding: 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ---------- Nothing yet ---------- */
+
+.board-empty-state {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.board-empty-state h3 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 20px;
+  color: var(--header-primary);
+}
+
+.board-empty-state p {
+  max-width: 420px;
+}
+
+/* ---------- The rail card ---------- */
+
+.board-mini {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+
+.board-mini img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.board-mini-plain {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, #11203a, #0a1322 60%);
+}
+
+.board-mini-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+}
+
+.board-mini-token {
+  position: absolute;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.6);
+}
+
+.board-mini-token.ally {
+  background: var(--green);
+}
+
+.board-mini-token.neutral {
+  background: #93a3bd;
+}
+
+.board-mini-token.enemy {
+  background: var(--red);
+}
+
+.board-mini-thumb {
+  flex-shrink: 0;
+  width: 44px;
+}
+
+.board-card-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.board-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--header-primary);
+}
+
+.board-card-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.board-card-viewers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.board-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---------- The token palette modal ---------- */
+
+.board-newtoken {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.board-newtoken-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.board-newtoken-section h4 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+}
+
+.board-char-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.board-char-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+}
+
+.board-char-row:hover {
+  background: var(--bg-mod-hover);
+}
+
+.board-char-row img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.board-char-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.board-char-owner {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.board-hp-fields {
+  display: flex;
+  gap: 12px;
+}
+
+.board-hp-fields > .field {
+  flex: 1;
+}
+
+.board-muted {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.board-disp-pick {
+  display: flex;
+  gap: 6px;
+}
+
+.board-disp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--bg-mod-hover);
+  color: var(--text-normal);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.board-disp.on {
+  border-color: var(--tone, var(--text-muted));
+  background: var(--bg-mod-active);
+}
+
+.board-disp-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.board-disp.ally {
+  --tone: var(--green);
+}
+
+.board-disp.neutral {
+  --tone: #93a3bd;
+}
+
+.board-disp.enemy {
+  --tone: var(--red);
+}
+
+/* ---------- Phones ---------- */
+
+@media (max-width: 900px) {
+  .board-chat {
+    display: none;
+  }
+
+  .board-zoom-slider,
+  .board-zoom-pct {
+    display: none;
+  }
+
+  .board-tray {
+    max-width: calc(100% - 20px);
+  }
+}

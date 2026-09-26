@@ -5,6 +5,8 @@ import { mergePatch, type Sheet } from '../lib/sheet';
 import { load, save } from '../lib/storage';
 import { MessageType } from './types';
 import type {
+  BoardDrawing,
+  BoardToken,
   Channel,
   ChannelMessages,
   Character,
@@ -19,6 +21,7 @@ import type {
   ReactionEmoji,
   Role,
   Server,
+  ServerBoard,
   ServerPayload,
   TheaterState,
   Track,
@@ -116,6 +119,7 @@ export interface State {
   libraries: Record<number, Library>;
   theater: Record<number, TheaterState>;
   theaterLibraries: Record<number, VideoLibrary>;
+  board: Record<number, ServerBoard>;
   sheets: Record<number, SheetEntry>;
   /** Who is speaking as whom, per channel: channel -> user -> persona id. */
   channelPersonas: Record<number, Record<number, number>>;
@@ -131,6 +135,8 @@ export interface State {
   jukeboxView: { serverId: number; tab: JukeboxTab } | null;
   /** Theater queue/library window. */
   theaterView: { serverId: number; tab: TheaterTab } | null;
+  /** The game board, open over the channel (board in the middle, chat beside it). */
+  boardView: { serverId: number } | null;
 
   // UI
   activeChannelId: number | null;
@@ -222,6 +228,7 @@ const initialData = {
   libraries: {},
   theater: {},
   theaterLibraries: {},
+  board: {},
   sheets: {},
   channelPersonas: {},
 };
@@ -239,6 +246,7 @@ export const useStore = create<State>(() => ({
   sheetView: null,
   jukeboxView: null,
   theaterView: null,
+  boardView: null,
   activeChannelId: null,
   memberListOpen: load<boolean>('memberList', true),
   mobileNavOpen: false,
@@ -348,8 +356,8 @@ export function persistUi() {
 // ---------------------------------------------------------------------------
 
 function flattenServer(p: ServerPayload) {
-  const { roles, channels, members, emojis, users: _u, characters: _c, voice_states, jukebox, theater, ...server } = p;
-  return { server: server as Server, roles, channels, members, emojis, voiceStates: voice_states ?? [], jukebox, theater };
+  const { roles, channels, members, emojis, users: _u, characters: _c, voice_states, jukebox, theater, board: boardState, ...server } = p;
+  return { server: server as Server, roles, channels, members, emojis, voiceStates: voice_states ?? [], jukebox, theater, board: boardState };
 }
 
 export function applyReady(d: ReadyPayload) {
@@ -361,6 +369,7 @@ export function applyReady(d: ReadyPayload) {
   const voiceStates: Record<number, VoiceState> = {};
   const jukebox: Record<number, JukeboxState> = {};
   const theater: Record<number, TheaterState> = {};
+  const board: Record<number, ServerBoard> = {};
   for (const sp of d.servers) {
     const f = flattenServer(sp);
     servers[f.server.id] = f.server;
@@ -371,6 +380,7 @@ export function applyReady(d: ReadyPayload) {
     for (const vs of f.voiceStates) voiceStates[vs.user_id] = vs;
     if (f.jukebox) jukebox[f.server.id] = f.jukebox;
     if (f.theater) theater[f.server.id] = f.theater;
+    if (f.board) board[f.server.id] = f.board;
   }
   const channelPersonas: Record<number, Record<number, number>> = {};
   for (const p of d.personas ?? []) {
@@ -415,6 +425,7 @@ export function applyReady(d: ReadyPayload) {
       voiceStates,
       jukebox,
       theater,
+      board,
       channelPersonas,
       // Sheets may have changed while we were away; refetch when opened.
       sheets: Object.fromEntries(Object.entries(s.sheets).map(([k, v]) => [k, { ...v, stale: true }])),
@@ -446,6 +457,7 @@ export function resetSession() {
     contextMenu: null,
     jukeboxView: null,
     theaterView: null,
+    boardView: null,
     sheetView: null,
   });
   // Logged out: the jukebox and the theater stop.
@@ -455,6 +467,14 @@ export function resetSession() {
 // ---------------------------------------------------------------------------
 // Gateway dispatch
 // ---------------------------------------------------------------------------
+
+/** Find the server whose board has this id (token and drawing events carry only the board's id). */
+function boardSlice(s: State, boardId: number): { serverId: number; sb: ServerBoard } | null {
+  for (const [key, sb] of Object.entries(s.board)) {
+    if (sb.board?.id === boardId) return { serverId: Number(key), sb };
+  }
+  return null;
+}
 
 type Handler = (d: any) => void; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -624,6 +644,7 @@ const handlers: Record<string, Handler> = {
         voiceStates,
         jukebox: f.jukebox ? { ...s.jukebox, [f.server.id]: f.jukebox } : s.jukebox,
         theater: f.theater ? { ...s.theater, [f.server.id]: f.theater } : s.theater,
+        board: f.board ? { ...s.board, [f.server.id]: f.board } : s.board,
       };
     });
   },
@@ -658,8 +679,10 @@ const handlers: Record<string, Handler> = {
         libraries: omit(s.libraries, [d.id]),
         theater: omit(s.theater, [d.id]),
         theaterLibraries: omit(s.theaterLibraries, [d.id]),
+        board: omit(s.board, [d.id]),
         jukeboxView: s.jukeboxView?.serverId === d.id ? null : s.jukeboxView,
         theaterView: s.theaterView?.serverId === d.id ? null : s.theaterView,
+        boardView: s.boardView?.serverId === d.id ? null : s.boardView,
         settings: s.settings?.kind === 'server' && s.settings.id === d.id ? null : s.settings,
       };
     });
@@ -884,6 +907,81 @@ const handlers: Record<string, Handler> = {
     setState((s) => {
       const th = s.theater[d.server_id];
       return th ? { theater: { ...s.theater, [d.server_id]: { ...th, listeners: d.user_ids } } } : {};
+    });
+  },
+
+  // -- game board ---------------------------------------------------------------------
+  BOARD_STATE(d: ServerBoard) {
+    setState((s) => {
+      const prev = s.board[d.server_id];
+      // Changes are numbered: an older board arriving late mustn't undo a newer one.
+      const keep = !!prev?.board && !!d.board && d.board.id === prev.board.id && d.board.rev < prev.board.rev;
+      return { board: { ...s.board, [d.server_id]: keep && prev ? { ...d, board: prev.board! } : d } };
+    });
+  },
+
+  BOARD_TOKEN_CREATE(t: BoardToken) {
+    setState((s) => {
+      const hit = boardSlice(s, t.board_id);
+      if (!hit?.sb.board) return {};
+      const cur = hit.sb.board;
+      const tokens = cur.tokens.some((x) => x.id === t.id) ? cur.tokens.map((x) => (x.id === t.id ? t : x)) : [...cur.tokens, t];
+      return { board: { ...s.board, [hit.serverId]: { ...hit.sb, board: { ...cur, tokens } } } };
+    });
+  },
+
+  BOARD_TOKEN_UPDATE(t: BoardToken) {
+    handlers.BOARD_TOKEN_CREATE(t);
+  },
+
+  BOARD_TOKEN_DELETE(d: { server_id: number; board_id: number; token_id: number }) {
+    setState((s) => {
+      const cur = s.board[d.server_id]?.board;
+      if (!cur || cur.id !== d.board_id) return {};
+      return {
+        board: {
+          ...s.board,
+          [d.server_id]: { ...s.board[d.server_id], board: { ...cur, tokens: cur.tokens.filter((t) => t.id !== d.token_id) } },
+        },
+      };
+    });
+  },
+
+  BOARD_DRAW_ADD(d: BoardDrawing) {
+    setState((s) => {
+      const hit = boardSlice(s, d.board_id);
+      if (!hit?.sb.board) return {};
+      const cur = hit.sb.board;
+      const drawings = cur.drawings.some((x) => x.id === d.id) ? cur.drawings.map((x) => (x.id === d.id ? d : x)) : [...cur.drawings, d];
+      return { board: { ...s.board, [hit.serverId]: { ...hit.sb, board: { ...cur, drawings } } } };
+    });
+  },
+
+  BOARD_DRAW_DELETE(d: { server_id: number; board_id: number; drawing_id: number }) {
+    setState((s) => {
+      const cur = s.board[d.server_id]?.board;
+      if (!cur || cur.id !== d.board_id) return {};
+      return {
+        board: {
+          ...s.board,
+          [d.server_id]: { ...s.board[d.server_id], board: { ...cur, drawings: cur.drawings.filter((x) => x.id !== d.drawing_id) } },
+        },
+      };
+    });
+  },
+
+  BOARD_DRAWS_CLEAR(d: { server_id: number; board_id: number }) {
+    setState((s) => {
+      const cur = s.board[d.server_id]?.board;
+      if (!cur || cur.id !== d.board_id || !cur.drawings.length) return {};
+      return { board: { ...s.board, [d.server_id]: { ...s.board[d.server_id], board: { ...cur, drawings: [] } } } };
+    });
+  },
+
+  BOARD_VIEWERS(d: { server_id: number; user_ids: number[] }) {
+    setState((s) => {
+      const sb = s.board[d.server_id];
+      return sb ? { board: { ...s.board, [d.server_id]: { ...sb, viewers: d.user_ids } } } : {};
     });
   },
 };

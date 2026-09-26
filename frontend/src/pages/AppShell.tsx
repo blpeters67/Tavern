@@ -8,6 +8,7 @@ import CommunityPage from '../components/CommunityPage';
 import HomeSidebar from '../components/HomeSidebar';
 import { TavernLogo } from '../components/icons';
 import { JukeboxWindowHost } from '../components/Jukebox';
+import { BoardRoom } from '../components/GameBoard';
 import { TheaterScreenHost } from '../components/Theater';
 import PeoplePage from '../components/PeoplePage';
 import { ProfilePopoutHost } from '../components/Profiles';
@@ -145,6 +146,7 @@ function Shell({
   const fxMotion = useStore((s) => s.me?.settings.fx_motion ?? true);
   const sheetOpen = useStore((s) => !!s.sheetView);
   const theaterWindowOpen = useStore((s) => !!s.theaterView);
+  const boardView = useStore((s) => s.boardView);
 
   const viewable = useStore((s) => (channel ? canView(s, channel) : false));
   const needsFallback = serverId !== null && !!server && !community && (!channel || channel.server_id !== server.id || !isServerView(channel.type) || !viewable);
@@ -258,6 +260,12 @@ function Shell({
         </Suspense>
       )}
       <TheaterScreenHost />
+      {boardView && (
+        <BoardRoom
+          serverId={boardView.serverId}
+          channel={activeChannel && activeChannel.server_id === boardView.serverId && activeChannel.type !== ChannelType.VOICE ? activeChannel : undefined}
+        />
+      )}
       <ProfilePopoutHost />
       {settings && (
         <Suspense fallback={null}>

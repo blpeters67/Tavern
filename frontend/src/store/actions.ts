@@ -4,7 +4,7 @@ import { gateway } from '../api/gateway';
 import { on } from '../lib/events';
 import { save } from '../lib/storage';
 import { toast } from '../components/Toasts';
-import { isDm, myCharacters, personaFor } from './selectors';
+import { firstChannel, isDm, myCharacters, personaFor } from './selectors';
 import {
   dispatch,
   emptyMessages,
@@ -23,7 +23,7 @@ import {
   type TheaterTab,
 } from './store';
 import type { Channel, ChannelMessages, Me, Message, PendingMessage, ReactionEmoji, ReplyRef, Settings } from './types';
-import { NARRATOR } from './types';
+import { ChannelType, NARRATOR } from './types';
 
 // ---------------------------------------------------------------------------
 // Navigation (the router registers its navigate function here)
@@ -153,6 +153,23 @@ export function openTheater(serverId: number, tab: TheaterTab = 'queue') {
 
 export function closeTheater() {
   setState({ theaterView: null });
+}
+
+/** Open the game board over the channel: board in the middle, chat beside it. */
+export function openBoard(serverId: number) {
+  const s = getState();
+  const here = s.activeChannelId !== null ? s.channels[s.activeChannelId] : undefined;
+  if (!here || here.server_id !== serverId || here.type !== ChannelType.TEXT) {
+    // The chat column beside the board wants a text channel of this server.
+    const last = s.lastChannelByServer[serverId];
+    const target = (last && s.channels[last]?.server_id === serverId && s.channels[last]?.type === ChannelType.TEXT ? last : firstChannel(s, serverId)?.id) ?? null;
+    if (target !== null) go(`/channels/${serverId}/${target}`);
+  }
+  setState({ boardView: { serverId }, contextMenu: null, mobileNavOpen: false, mobileMembersOpen: false });
+}
+
+export function closeBoard() {
+  setState({ boardView: null });
 }
 
 export function toggleMemberList() {

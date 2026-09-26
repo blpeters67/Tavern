@@ -2,9 +2,9 @@
 import { create } from 'zustand';
 import { load, save } from './storage';
 
-export type CardName = 'jukebox' | 'theater';
+export type CardName = 'jukebox' | 'theater' | 'board';
 
-const usePanelPrefs = create<Record<CardName, boolean>>(() => load<Record<CardName, boolean>>('collapsedCards', { jukebox: false, theater: false }));
+const usePanelPrefs = create<Record<CardName, boolean>>(() => load<Record<CardName, boolean>>('collapsedCards', { jukebox: false, theater: false, board: false }));
 
 /** Is this card folded up (the eye is closed)? */
 export function useCollapsed(name: CardName): boolean {

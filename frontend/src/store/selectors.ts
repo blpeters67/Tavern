@@ -189,6 +189,9 @@ export function canControlJukebox(s: State, serverId: number): boolean {
 /** The theater follows the same rule as the jukebox: DJs, or only Dungeon Masters under DM Lock. */
 export const canControlTheater = canControlJukebox;
 
+/** The game board follows the same rule as the jukebox: DJs, or only Dungeon Masters under DM Lock. */
+export const canControlBoard = canControlJukebox;
+
 export function voiceMembers(s: State, channelId: number): VoiceState[] {
   return Object.values(s.voiceStates)
     .filter((v) => v.channel_id === channelId)

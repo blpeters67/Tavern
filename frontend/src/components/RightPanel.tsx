@@ -12,6 +12,7 @@ import { tip } from './layers';
 import { openUserProfile, userMenu } from './Profiles';
 import { SearchResults } from './SearchPanel';
 import { TheaterCard } from './Theater';
+import { BoardCard } from './GameBoard';
 import { Avatar } from './ui';
 import { calmColor } from '../lib/format';
 
@@ -206,6 +207,7 @@ function MemberGroups({ channel, serverId }: { channel: Channel | undefined; ser
 export default function RightPanel({ channel, serverId, open }: { channel: Channel | undefined; serverId: number | null; open: boolean }) {
   const hasJukebox = useStore((s) => serverId !== null && !!s.jukebox[serverId]);
   const hasTheater = useStore((s) => serverId !== null && !!s.theater[serverId]);
+  const hasBoard = useStore((s) => serverId !== null && !!s.board[serverId]);
   const panel = useStore((s) => s.rightPanel);
   const search =
     panel.kind === 'search' && panel.serverId === serverId && (serverId !== null || panel.channelId === channel?.id) ? panel : null;
@@ -220,6 +222,7 @@ export default function RightPanel({ channel, serverId, open }: { channel: Chann
               <RoleplayToggle serverId={serverId} />
               {hasJukebox && <JukeboxCard serverId={serverId} />}
               {hasTheater && <TheaterCard serverId={serverId} />}
+              {hasBoard && <BoardCard serverId={serverId} />}
             </div>
           )}
           <MemberGroups channel={channel} serverId={serverId} />

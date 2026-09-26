@@ -1,6 +1,6 @@
 # Tavern
 
-A self-hosted, Discord-style chat for roleplaying with friends. It has servers, text channels, voice spaces, roles, DMs, replies, pins, reactions, custom emoji, uploads, link previews and search. On top of that it has the tabletop pieces: characters with full D&D 5e sheets, dice everyone sees roll, a narrator voice for the Dungeon Master, text effects for dramatic moments, a jukebox that plays the same song at the same moment for everyone listening, and a theater that does the same for videos.
+A self-hosted, Discord-style chat for roleplaying with friends. It has servers, text channels, voice spaces, roles, DMs, replies, pins, reactions, custom emoji, uploads, link previews and search. On top of that it has the tabletop pieces: characters with full D&D 5e sheets, dice everyone sees roll, a narrator voice for the Dungeon Master, text effects for dramatic moments, a jukebox that plays the same song at the same moment for everyone listening, a theater that does the same for videos, and a game board where everyone's tokens sit on the same battle map.
 
 ```
 backend/    FastAPI + SQLite (Python 3.12): API, live gateway, voice signalling, jukebox, theater, dice
@@ -105,6 +105,17 @@ The card under the jukebox. It works like the jukebox, but for videos: press **T
 3. In the app's **Settings**, copy the **Client ID** and **Client secret** into `.env` as `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`, then run `docker compose up -d`.
 
 Songs and albums work straight away. Spotify only lets apps read a playlist's songs for the person who owns it (or collaborates on it), so for playlists a DJ clicks **connect your Spotify account** in the jukebox Library once. A developer app can have up to five Spotify users: add your friends' Spotify emails under **User Management** in the dashboard if they want to import their own playlists too.
+
+## Game Board
+
+The card under the theater. It's a shared battle map: everyone looks at the same board at the same moment, like the theater but for the table.
+
+- **Boards** are saved per server — one for the goblin ambush, one for the sunken temple. Whoever runs the game switches between them from the board's title menu, and everyone follows along.
+- **Background:** upload a picture (PNG or JPG, 64 MB by default) and it becomes the map. The grid sits on top, with a square size you pick.
+- **Tokens:** the Dungeon Master places monsters, NPCs and markers from **Place Token** (name, ring colour, optional hit points) and can drop any character onto the board. Players get a button that puts their own character on too.
+- **Moving around:** drag a token where you want it and it snaps to the square; drag the map to pan, scroll to zoom, **Fit** brings it back into view; the grid toggle hides the lines. Clicking a character's token opens their sheet.
+- **Rings and hit points:** green for allies, grey for neutrals, red for enemies (right-click a token to change its ring). A free token carries its own hit-point bar; a character's follows that character's sheet.
+- The avatars in the board's top bar (and on its card) show who has the board open.
 
 ## Characters, sheets and dice
 
