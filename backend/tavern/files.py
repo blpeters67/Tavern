@@ -26,7 +26,7 @@ log = logging.getLogger("tavern.files")
 
 Image.MAX_IMAGE_PIXELS = 60_000_000
 
-BUCKETS = ("avatars", "icons", "emojis", "attachments", "previews", "music", "covers", "videos", "posters", "tmp")
+BUCKETS = ("avatars", "icons", "emojis", "attachments", "previews", "music", "covers", "videos", "posters", "boards", "tmp")
 
 FFPROBE = shutil.which("ffprobe")
 
@@ -194,6 +194,43 @@ def save_attachment(upload: UploadFile, limit: int) -> dict:
         "width": width,
         "height": height,
     }
+
+
+def save_board_image(upload: UploadFile, limit: int) -> tuple[str, int, int]:
+    """Store a game board picture (a battle map, a token portrait) as uploaded:
+    maps are big and often pixel-exact PNGs, so nothing is re-encoded. Returns
+    (stored name, width, height)."""
+    filename = clean_filename(upload.filename)
+    ext = Path(filename).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", ext or ""):
+        ext = ""
+    stored = f"{random_key(16)}{ext}"
+    path = bucket_path("boards", stored)
+    size = 0
+    try:
+        with open(path, "wb") as out:
+            while chunk := upload.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise ApiError(413, f"That picture is too big. The limit is {limit // (1024 * 1024)} MB.")
+                out.write(chunk)
+        if size == 0:
+            raise bad_request("That file is empty.")
+        try:
+            with Image.open(path) as img:
+                img.verify()
+            with Image.open(path) as img:
+                if img.format not in ("PNG", "JPEG", "WEBP", "GIF", "BMP", "AVIF", "MPO"):
+                    raise bad_request("That doesn't look like a picture we can use. Try a PNG, JPG or WEBP.")
+                width, height = img.size
+        except ApiError:
+            raise
+        except Exception:
+            raise bad_request("That doesn't look like a picture we can use. Try a PNG, JPG or WEBP.") from None
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return stored, width, height
 
 
 # ---------------------------------------------------------------------------

@@ -217,6 +217,7 @@ def server_payload(db: Session, server: Server) -> dict[str, Any]:
     for mr in db.scalars(select(MemberRole).where(MemberRole.server_id == server.id)):
         member_roles[mr.user_id].append(mr.role_id)
     emojis = list(db.scalars(select(Emoji).where(Emoji.server_id == server.id)))
+    from .board import board
     from .jukebox import jukebox
     from .theater import theater
     from .voice import voice
@@ -227,6 +228,7 @@ def server_payload(db: Session, server: Server) -> dict[str, Any]:
         "voice_states": voice.states_for_server(server.id),
         "jukebox": jukebox.payload(db, server.id),
         "theater": theater.payload(db, server.id),
+        "board": board.payload(db, server),
         "roles": [role_payload(r) for r in roles],
         "channels": [channel_payload(c, overwrites.get(c.id, [])) for c in channels],
         "members": [member_payload(m, member_roles.get(m.user_id, [])) for m in members],

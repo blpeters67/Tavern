@@ -16,6 +16,7 @@ from ..deps import SESSION_COOKIE, authenticate_token, origin_allowed
 from ..gateway import Connection, gateway
 from ..models import User
 from ..serializers import user_payload
+from ..board import board
 from ..jukebox import jukebox
 from ..services import build_ready, related_user_ids
 from ..theater import theater
@@ -82,6 +83,16 @@ async def _theater_seat(conn: Connection, d: dict) -> None:
     theater.set_listening(server_id, conn.user_id, id(conn), bool(d.get("seated")), members)
 
 
+async def _board_view(conn: Connection, d: dict) -> None:
+    server_id = d.get("server_id")
+    if not isinstance(server_id, int):
+        return
+    members = await run_in_threadpool(_member_ids, server_id)
+    if conn.user_id not in members:
+        return
+    board.set_viewing(server_id, conn.user_id, id(conn), bool(d.get("viewing")), members)
+
+
 @router.websocket("/api/gateway")
 async def gateway_socket(ws: WebSocket) -> None:
     origin = ws.headers.get("origin")
@@ -139,6 +150,8 @@ async def gateway_socket(ws: WebSocket) -> None:
                 await _jukebox_listen(conn, d)
             elif op == 10:
                 await _theater_seat(conn, d)
+            elif op == 12:
+                await _board_view(conn, d)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -151,6 +164,9 @@ async def gateway_socket(ws: WebSocket) -> None:
         for server_id in theater.connection_closed(user_id, id(conn)):
             members = await run_in_threadpool(_member_ids, server_id)
             gateway.publish(members, "THEATER_SEATS", {"server_id": server_id, "user_ids": theater.listeners(server_id)})
+        for server_id in board.connection_closed(user_id, id(conn)):
+            members = await run_in_threadpool(_member_ids, server_id)
+            gateway.publish(members, "BOARD_VIEWERS", {"server_id": server_id, "user_ids": board.viewers(server_id)})
         offline = gateway.remove(conn)
         if offline:
             # Give page refreshes a moment to reconnect before showing

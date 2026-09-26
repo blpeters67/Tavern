@@ -72,6 +72,8 @@ class Settings:
     spotify_client_secret: str | None
     # Theater: biggest uploaded video (YouTube videos aren't stored at all)
     theater_max_video_mb: int
+    # Game board: biggest uploaded picture (battle maps are often large PNGs)
+    board_max_mb: int
 
     @property
     def db_path(self) -> Path:
@@ -141,6 +143,7 @@ def load_settings() -> Settings:
         spotify_client_id=_env("SPOTIFY_CLIENT_ID"),
         spotify_client_secret=_env("SPOTIFY_CLIENT_SECRET"),
         theater_max_video_mb=max(1, _env_int("THEATER_MAX_VIDEO_MB", 500)),
+        board_max_mb=max(1, _env_int("BOARD_MAX_MB", 64)),
     )
 
 

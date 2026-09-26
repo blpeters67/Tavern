@@ -477,7 +477,7 @@ def build_ready(db: Session, user_id: int, session_id: int) -> dict[str, Any]:
         "characters": people["characters"],
         "read_states": read_states,
         "server_time": iso(utcnow()),
-        "limits": {"max_upload_mb": settings.max_upload_mb},
+        "limits": {"max_upload_mb": settings.max_upload_mb, "board_max_mb": settings.board_max_mb},
     }
 
 

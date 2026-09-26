@@ -8,6 +8,7 @@ import mimetypes
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -138,3 +139,17 @@ def video(video_id: int, name: str, user: User = Depends(current_user), db: Sess
     if v is None or v.file != name or db.get(Member, (v.server_id, user.id)) is None:
         raise ApiError(404, "File not found.")
     return _serve(bucket_path("videos", name), v.mime or "video/mp4", cache="private, max-age=604800, immutable")
+
+
+@router.api_route("/boards/{board_id}/{name}", methods=["GET", "HEAD"])
+def board_image(board_id: int, name: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> FileResponse:
+    """A board's background picture or a free token's portrait (server members only)."""
+    from ..models import Board, BoardToken, Member
+
+    b = db.get(Board, board_id)
+    if b is None or db.get(Member, (b.server_id, user.id)) is None:
+        raise ApiError(404, "File not found.")
+    known = b.background == name or db.scalar(select(BoardToken.id).where(BoardToken.board_id == b.id, BoardToken.avatar == name).limit(1)) is not None
+    if not known:
+        raise ApiError(404, "File not found.")
+    return _serve(bucket_path("boards", name), _image_type(name), cache="private, max-age=604800")

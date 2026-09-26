@@ -22,6 +22,7 @@ from .gateway import gateway
 from .jukebox import jukebox, reset_stuck_tracks
 from .theater import reset_stuck_videos, theater
 from .routes import auth, cdn, channels, characters, dms, gateway_ws, invites, messages, rolls, search, servers, users
+from .routes import boards as board_routes
 from .routes import jukebox as jukebox_routes
 from .routes import spotify as spotify_routes
 from .routes import theater as theater_routes
@@ -59,6 +60,10 @@ def _body_limit(path: str) -> int:
         return settings.theater_max_video_mb * mb * 10
     if path.endswith("/jukebox/tracks"):
         return settings.jukebox_max_track_mb * mb * 50
+    if path.endswith("/background"):
+        return settings.board_max_mb * mb * 2
+    if "/board/" in path and path.endswith("/avatar"):
+        return 12 * mb
     return settings.max_upload_bytes
 
 
@@ -153,7 +158,7 @@ def create_app() -> FastAPI:
     async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
         return JSONResponse({"detail": exc.detail if isinstance(exc.detail, str) else "Error"}, status_code=exc.status_code)
 
-    for module in (auth, users, characters, servers, channels, messages, rolls, search, dms, invites, cdn, gateway_ws, voice_routes, jukebox_routes, theater_routes, spotify_routes):
+    for module in (auth, users, characters, servers, channels, messages, rolls, search, dms, invites, cdn, gateway_ws, voice_routes, jukebox_routes, theater_routes, spotify_routes, board_routes):
         app.include_router(module.router)
     app.include_router(characters.sheet_router)
 

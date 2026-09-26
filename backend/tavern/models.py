@@ -168,6 +168,9 @@ class Server(Base):
     narrator_name: Mapped[str | None] = mapped_column(String(32))
     # While on, only Dungeon Masters control the jukebox.
     roleplay_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The game board everyone in this server is looking at. Not a real FK to
+    # avoid a cycle (boards point back at servers).
+    active_board_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -450,6 +453,79 @@ class TheaterState(Base):
 
     server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+# ---------------------------------------------------------------------------
+# Game board
+# ---------------------------------------------------------------------------
+
+
+class Board(Base):
+    """One saved game board: a background picture with a grid, tokens and
+    drawings on top. A server can keep several and switch between them; every
+    server member sees the same one at the same time."""
+
+    __tablename__ = "boards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    # The background picture (a file in the "boards" bucket) and its pixel size.
+    background: Mapped[str | None] = mapped_column(String(80))
+    bg_width: Mapped[int | None] = mapped_column(Integer)
+    bg_height: Mapped[int | None] = mapped_column(Integer)
+    # Grid: square size in board pixels, and whether tokens snap to it.
+    grid_size: Mapped[int] = mapped_column(Integer, default=70)
+    snap: Mapped[bool] = mapped_column(Boolean, default=True)
+    # The combat tracker: [{"id", "name", "token_id", "initiative", "current"}].
+    tracker: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Bumped on structural changes so clients can drop stale full states.
+    rev: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class BoardToken(Base):
+    """A token on a board. A character's token follows the character (name,
+    picture, hit points); a free token (an NPC, a marker) carries its own."""
+
+    __tablename__ = "board_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"), index=True)
+    character_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id", ondelete="SET NULL"))
+    name: Mapped[str | None] = mapped_column(String(80))
+    avatar: Mapped[str | None] = mapped_column(String(80))
+    x: Mapped[float] = mapped_column(default=0.0)
+    y: Mapped[float] = mapped_column(default=0.0)
+    # ally | neutral | enemy — the ring drawn around the token.
+    disposition: Mapped[str] = mapped_column(String(8), default="neutral")
+    # Size in grid squares.
+    size: Mapped[int] = mapped_column(Integer, default=1)
+    # Whose token it is (players move their own characters; DMs move anything).
+    owner_id: Mapped[int | None] = mapped_column(Integer)
+    # Free tokens carry their own hit points for the bar underneath.
+    hp: Mapped[int | None] = mapped_column(Integer)
+    hp_max: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class BoardDrawing(Base):
+    """A pen stroke, arrow, shape or text label drawn on a board."""
+
+    __tablename__ = "board_drawings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="CASCADE"), index=True)
+    # pen | arrow | rect | ellipse | text
+    kind: Mapped[str] = mapped_column(String(8), default="pen")
+    color: Mapped[str] = mapped_column(String(9), default="#e5484d")
+    width: Mapped[float] = mapped_column(default=3.0)
+    # pen: {"points": [[x, y], ...]}; arrow/rect/ellipse: {"from", "to"};
+    # text: {"at", "text", "size"}.
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    author_id: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # SQLite hands a deleted row's id to the next insert unless AUTOINCREMENT is
