@@ -45,6 +45,29 @@ export interface RollRequest {
   private?: boolean;
 }
 
+/**
+ * Mirror of dice.py `_advantage_expression`. With advantage or disadvantage a
+ * plain single die rolls twice, keeping the better or worse one: 1d20+5 becomes
+ * 2d20kh1+5, and a d20 is preferred when several dice were picked. The server
+ * applies this to the real roll; the tray only previews it (the text is
+ * normalised, so use it for display, not for sending).
+ */
+export function withAdvantage(expression: string, adv: 'adv' | 'dis' | null | undefined): string {
+  if (!adv) return expression;
+  const text = (expression || '').replace(/\s+/g, '').toLowerCase();
+  const term = /(\d*)d(\d+|%)((?:kh\d*|kl\d*|dh\d*|dl\d*|k\d*|!)*)/g;
+  let pick: { index: number; length: number; sides: number } | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = term.exec(text))) {
+    if (Number(m[1] || 1) !== 1 || m[3]) continue;
+    const sides = m[2] === '%' ? 100 : Number(m[2]);
+    if (!pick || (sides === 20 && pick.sides !== 20)) pick = { index: m.index, length: m[0].length, sides };
+  }
+  if (!pick) return expression;
+  const die = `2d${pick.sides === 100 ? '100' : pick.sides}${adv === 'adv' ? 'kh' : 'kl'}1`;
+  return text.slice(0, pick.index) + die + text.slice(pick.index + pick.length);
+}
+
 let nonceCounter = 0;
 
 /** Ask the server to roll. Returns the created message, or null on failure (after a toast). */

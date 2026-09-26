@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { characterAvatar, userAvatar } from '../lib/avatars';
-import { canRollForOthers, canRollPrivately, roll, type RollRequest } from '../lib/rolls';
+import { canRollForOthers, canRollPrivately, roll, withAdvantage, type RollRequest } from '../lib/rolls';
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -289,6 +289,8 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
   };
 
   const expression = typed ?? buildExpression(pool, mod);
+  // What the roll will do: with Adv/Dis a single die rolls twice (the server applies this).
+  const shown = withAdvantage(expression, opts.adv);
   const poolCount = useMemo(() => Object.values(pool).reduce((n, c) => n + c, 0), [pool]);
 
   const fire = async (req: RollRequest, e?: { shiftKey: boolean }) => {
@@ -402,7 +404,7 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
             onClick={(e) => void fire({ kind: 'custom', expression }, e)}
             {...tip('Shift+click to keep the tray open')}
           >
-            {busy ? 'Rolling…' : `Roll ${expression || ''}`}
+            {busy ? 'Rolling…' : `Roll ${shown || ''}`}
           </button>
         </form>
       ) : (
@@ -424,7 +426,7 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
               aria-checked={opts.adv === v}
               className={opts.adv === v ? 'on' : ''}
               onClick={() => setOption({ adv: v })}
-              {...tip(v === 'adv' ? 'Advantage: roll two d20s, keep the higher' : v === 'dis' ? 'Disadvantage: roll two d20s, keep the lower' : 'Roll normally')}
+              {...tip(v === 'adv' ? 'Advantage: roll two dice, keep the higher' : v === 'dis' ? 'Disadvantage: roll two dice, keep the lower' : 'Roll normally')}
             >
               {label}
             </button>

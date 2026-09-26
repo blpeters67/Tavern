@@ -81,6 +81,20 @@ function flatten(part: RollPart): FlatDie[] {
   return out;
 }
 
+/** Indexes of the lone counted die of a term (a kh1/kl1 roll): the one that was
+ * kept when two dice were rolled and the other crossed out. */
+function keptDice(part: RollPart): Set<number> {
+  const kept = new Set<number>();
+  let i = 0;
+  for (const t of part.terms) {
+    if (t.kind !== 'dice') continue;
+    const winners = t.rolls.map((r, k) => ({ r, k })).filter((x) => !x.r.drop);
+    if (t.rolls.length > 1 && winners.length === 1) kept.add(i + winners[0].k);
+    i += t.rolls.length;
+  }
+  return kept;
+}
+
 function termText(t: RollTerm, first: boolean): string {
   const sign = t.sign < 0 ? '−' : '+';
   const body = t.kind === 'dice' ? `${t.count}d${t.sides === 100 ? '%' : t.sides}` : String(t.value);
@@ -102,8 +116,9 @@ function landAt(i: number): number {
   return Math.min(650 + i * 55, 1150);
 }
 
-function Part({ part, multi, elapsed, animating, expanded, onExpand }: { part: RollPart; multi: boolean; elapsed: number; animating: boolean; expanded: boolean; onExpand: () => void }) {
+function Part({ part, multi, elapsed, animating, expanded, onExpand, adv }: { part: RollPart; multi: boolean; elapsed: number; animating: boolean; expanded: boolean; onExpand: () => void; adv: 'adv' | 'dis' | null }) {
   const dice = useMemo(() => flatten(part), [part]);
+  const kept = useMemo(() => keptDice(part), [part]);
   const shown = expanded ? dice : dice.slice(0, MAX_SHOWN);
   const hidden = dice.length - shown.length;
   const done = !animating || elapsed >= landAt(Math.min(dice.length, MAX_SHOWN) - 1);
@@ -123,12 +138,17 @@ function Part({ part, multi, elapsed, animating, expanded, onExpand }: { part: R
             const landed = !animating || elapsed >= landAt(d.index);
             const face = landed ? d.roll.v : 1 + ((Math.floor(elapsed / TICK_MS) * 7919 + d.index * 104729 + d.sides * 31) % d.sides);
             const nat = landed && d.sides === 20 && d20 !== null && !d.roll.drop ? (d.roll.v === 20 ? 'nat20' : d.roll.v === 1 ? 'nat1' : '') : '';
+            const counted = landed && !d.roll.drop && kept.has(d.index);
+            const dieTip = !landed ? undefined
+              : d.roll.drop ? (adv === 'adv' ? 'Dropped: the lower roll' : adv === 'dis' ? 'Dropped: the higher roll' : 'Dropped')
+              : counted ? (adv === 'adv' ? 'Counted: the higher roll' : adv === 'dis' ? 'Counted: the lower roll' : 'Counted')
+              : d.roll.exp ? 'Exploded: rolled again' : undefined;
             return (
               <span
                 key={d.index}
-                className={`roll-die ${landed ? 'landed' : 'tumbling'} ${d.roll.drop && landed ? 'dropped' : ''} ${d.roll.exp && landed ? 'exploded' : ''} ${nat}`}
+                className={`roll-die ${landed ? 'landed' : 'tumbling'} ${d.roll.drop && landed ? 'dropped' : ''} ${counted ? 'kept' : ''} ${d.roll.exp && landed ? 'exploded' : ''} ${nat}`}
                 style={animating ? { animationDelay: `${(d.index % 5) * -90}ms` } : undefined}
-                {...(landed && d.roll.drop ? tip('Dropped') : landed && d.roll.exp ? tip('Exploded: rolled again') : {})}
+                {...(dieTip ? tip(dieTip) : {})}
               >
                 <DieShape sides={d.sides} value={face} />
               </span>
@@ -214,7 +234,7 @@ const RollView = memo(function RollView({ message }: { message: Message }) {
         )}
       </div>
       {roll.parts.map((p, i) => (
-        <Part key={i} part={p} multi={roll.parts.length > 1} elapsed={elapsed} animating={animating} expanded={expanded} onExpand={() => setExpanded(true)} />
+        <Part key={i} part={p} multi={roll.parts.length > 1} elapsed={elapsed} animating={animating} expanded={expanded} onExpand={() => setExpanded(true)} adv={roll.adv ?? null} />
       ))}
       {roll.dc !== undefined && outcome && (
         <div className={`roll-outcome reveal ${landed ? 'shown' : ''}`}>

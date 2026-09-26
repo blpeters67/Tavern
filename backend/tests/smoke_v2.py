@@ -237,6 +237,19 @@ def run(log_path: Path, data_dir: Path) -> None:
     assert r["type"] == 20 and r["meta"]["roll"]["parts"][0]["expression"] == "2d20kh1+3"
     assert r["content"].startswith("🎲")
     gw_c.wait_for("MESSAGE_CREATE", lambda d: d["id"] == r["id"])
+    # Advantage/disadvantage on a plain roll: the single die rolls twice, keeping the higher/lower
+    r = ok(b.post(f"/api/channels/{general['id']}/rolls", json={"kind": "custom", "expression": "1d20+5", "adv": "adv"}))
+    part = r["meta"]["roll"]["parts"][0]
+    assert r["meta"]["roll"]["adv"] == "adv" and part["expression"] == "2d20kh1+5"
+    rolls = part["terms"][0]["rolls"]
+    assert len(rolls) == 2 and sum(1 for x in rolls if x.get("drop")) == 1
+    kept = next(x["v"] for x in rolls if not x.get("drop"))
+    assert kept == max(x["v"] for x in rolls) and part["total"] == kept + 5
+    r = ok(b.post(f"/api/channels/{general['id']}/rolls", json={"kind": "custom", "expression": "1d8", "adv": "dis"}))
+    part = r["meta"]["roll"]["parts"][0]
+    rolls = part["terms"][0]["rolls"]
+    assert part["expression"] == "2d8kl1" and len(rolls) == 2
+    assert next(x["v"] for x in rolls if not x.get("drop")) == min(x["v"] for x in rolls)
     r = ok(b.post(f"/api/channels/{general['id']}/rolls", json={"kind": "skill", "key": "stealth", "character_id": isa["id"], "dc": 15}))
     roll = r["meta"]["roll"]
     assert roll["parts"][0]["expression"] == "1d20+10" and roll["outcome"] in ("success", "failure") and roll["flavor"]

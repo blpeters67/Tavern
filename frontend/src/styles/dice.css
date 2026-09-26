@@ -172,6 +172,14 @@
   height: 100%;
 }
 
+.roll-die.kept .die-body {
+  stroke: var(--green);
+}
+
+.roll-die.kept .die-value {
+  fill: #74e0a4;
+}
+
 .roll-die.dropped {
   opacity: 0.38;
 }

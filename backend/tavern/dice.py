@@ -282,6 +282,22 @@ def _with_advantage(mod: int, adv: str | None) -> str:
     return f"{die}{mod:+d}" if mod else die
 
 
+def _advantage_expression(expression: str, adv: str | None) -> str:
+    """Advantage/disadvantage on a plain roll: the first single die (a d20 if one
+    was picked, otherwise whatever it is) rolls twice, keeping the better or worse
+    one — 1d20+5 becomes 2d20kh1+5, 1d8 becomes 2d8kl1."""
+    if not adv:
+        return expression
+    parsed = parse(expression)
+    candidates = [t for t in parsed.terms if t.number is None and t.count == 1 and not t.keep and not t.explode]
+    pick = next((t for t in candidates if t.sides == 20), candidates[0] if candidates else None)
+    if pick is None:
+        return expression
+    pick.count = 2
+    pick.keep = ("h" if adv == "adv" else "l", 1)
+    return parsed.notation()
+
+
 def _part(label: str, expression: str, *, crit_double: bool = False, check: bool = False) -> dict[str, Any]:
     parsed = parse(expression)
     result = roll_parsed(parsed, crit_double=crit_double)
@@ -317,6 +333,7 @@ def build_roll(
     if kind == "custom":
         if not expression:
             raise DiceError("Enter some dice, like 1d20+5.")
+        expression = _advantage_expression(expression, adv)
         part = _part(title or "Roll", expression, check=True)
         parts.append(part)
         outcome_part = part if dc is not None else None
