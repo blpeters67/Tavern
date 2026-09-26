@@ -496,7 +496,7 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
     python tests/smoke_theater.py
   Each ends with "ALL ... PASSED" or fails loudly. Add assertions when you change server
   behaviour.
-- `ruff check .` from backend/ must pass (default rules). Don't run `ruff format` or black:
+- `ruff check .` from backend/ must pass (default rules). The version line is ruff 0.15.x — 0.16+ starts flagging plenty of older code with wider defaults, so don't "fix" the repo for a newer ruff without being asked. Don't run `ruff format` or black:
   lines here run long (often 150+ characters) and a formatter would rewrite nearly every file.
 - Frontend, from frontend/: `npm run typecheck` and `npm run build` must pass. There's no
   linter, formatter or unit-test setup. Match the surrounding style (2 spaces, single quotes,
