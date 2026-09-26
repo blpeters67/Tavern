@@ -515,9 +515,11 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 9. WORKING WITH BENJI
 ==========================================================================================
 
-- Deploying: Benji runs `docker compose up -d --build` in the Tavern folder, which rebuilds
-  the frontend inside Docker. Tell him when a change needs it. New columns and tables are
-  added automatically at startup.
+- Deploying: after any change, rebuild and restart the local deployment yourself —
+  `docker compose up -d --build tavern` in the Tavern folder (a few minutes; frontend and
+  backend build inside Docker, the tunnel container stays up). Check `docker logs tavern`
+  for the new version banner before calling it done. README/handoff-only edits don't need
+  the rebuild. New columns and tables are added automatically at startup.
 - The version lives in four places; bump them together: backend/tavern/__init__.py,
   frontend/package.json, frontend/package-lock.json (the top "version" and the one under
   packages[""]), and the footer in frontend/src/settings/UserSettings.tsx.
