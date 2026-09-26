@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type MouseEvent } from 'react';
+import { useState, type FormEvent, type MouseEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { characterAvatar, userAvatar } from '../lib/avatars';
 import { canRollForOthers, canRollPrivately, roll, withAdvantage, type RollRequest } from '../lib/rolls';
@@ -36,9 +36,9 @@ interface TrayOptions {
   tab: 'dice' | 'checks';
 }
 
-function buildExpression(pool: Record<number, number>, mod: number): string {
-  const parts = DICE.filter((d) => pool[d]).map((d) => `${pool[d]}d${d === 100 ? '%' : d}`);
-  let out = parts.join('+');
+/** The picked die (one at a time) and the modifier, as dice notation. */
+function buildExpression(die: number | null, mod: number): string {
+  let out = die ? `1d${die === 100 ? '%' : die}` : '';
   if (mod) out += `${mod > 0 ? '+' : ''}${mod}`;
   return out;
 }
@@ -272,7 +272,7 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
   const [target, setTarget] = useState<Target | null>(null);
   const who = target ?? defaultTarget;
   const [opts, setOpts] = useState<TrayOptions>(() => ({ adv: null, dc: '', private: false, tab: 'dice', ...load<Partial<TrayOptions>>('diceTray', {}) }));
-  const [pool, setPool] = useState<Record<number, number>>({});
+  const [die, setDie] = useState<number | null>(null);
   const [mod, setMod] = useState(0);
   const [typed, setTyped] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -288,10 +288,9 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
     });
   };
 
-  const expression = typed ?? buildExpression(pool, mod);
-  // What the roll will do: with Adv/Dis a single die rolls twice (the server applies this).
+  const expression = typed ?? buildExpression(die, mod);
+  // What the roll will do: with Adv/Dis the picked die rolls twice (the server applies this).
   const shown = withAdvantage(expression, opts.adv);
-  const poolCount = useMemo(() => Object.values(pool).reduce((n, c) => n + c, 0), [pool]);
 
   const fire = async (req: RollRequest, e?: { shiftKey: boolean }) => {
     if (busy) return;
@@ -310,14 +309,11 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
     if (res && !e?.shiftKey) onClose();
   };
 
-  const add = (d: number, delta: number) => {
+  // One die at a time: clicking picks it, clicking it again (or right-clicking) clears it,
+  // and clicking another die swaps. Multi-dice rolls go through the typed expression.
+  const pick = (d: number) => {
     setTyped(null);
-    setPool((p) => {
-      const n = Math.max(0, Math.min(99, (p[d] ?? 0) + delta));
-      const next = { ...p, [d]: n };
-      if (!n) delete next[d];
-      return next;
-    });
+    setDie((cur) => (cur === d ? null : d));
   };
 
   const submit = (e: FormEvent) => {
@@ -348,17 +344,17 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
               <button
                 type="button"
                 key={d}
-                className={`dice-pick ${pool[d] ? 'on' : ''}`}
-                onClick={() => add(d, 1)}
+                className={`dice-pick ${die === d ? 'on' : ''}`}
+                onClick={() => pick(d)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  add(d, -1);
+                  if (die === d) setDie(null);
                 }}
                 aria-label={`Add a d${d}`}
-                {...tip(pool[d] ? `${pool[d]}d${d} (right-click to remove one)` : `d${d}`)}
+                aria-pressed={die === d}
+                {...tip(die === d ? `d${d} (click again to remove)` : `d${d}`)}
               >
                 <DieShape sides={d} />
-                {pool[d] ? <span className="dice-pick-count">{pool[d]}</span> : null}
               </button>
             ))}
           </div>
@@ -381,14 +377,14 @@ export default function DiceTray({ channelId, onClose }: { channelId: number; on
               maxLength={120}
               spellCheck={false}
             />
-            {(poolCount > 0 || mod !== 0 || typed) && (
+            {(die !== null || mod !== 0 || typed) && (
               <button
                 type="button"
                 className="dice-clear"
                 aria-label="Clear"
                 {...tip('Clear')}
                 onClick={() => {
-                  setPool({});
+                  setDie(null);
                   setMod(0);
                   setTyped(null);
                 }}

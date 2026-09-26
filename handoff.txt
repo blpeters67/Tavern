@@ -287,7 +287,9 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   with meta.roll. Private rolls are dm_only. Advantage/disadvantage on a plain roll
   doubles the first single die (a d20 preferred) to 2d20kh1/kl1 (dice.py
   _advantage_expression); lib/rolls.ts withAdvantage mirrors it for the tray preview, and
-  RollView marks the counted die green and crosses the dropped one out.
+  RollView marks the counted die green and crosses the dropped one out. The tray's quick-dice
+  buttons pick one die at a time — click to pick, click again (or right-click) to clear,
+  clicking another swaps — so stacking dice is for typed expressions and /roll.
 
 4.10 Accounts and security
 - Sign-up is invite-only. While there are no accounts, the log prints a one-time link
