@@ -492,9 +492,9 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   toggle there). The chat's channel is the active text channel, falling back to
   lastChannelByServer so joining voice keeps the messages beside the map. Two ColumnHandle
   separators (AppShell) drag the side columns: widths go to the DOM while dragging and land
-  in localStorage (boardLeftW / boardRightW) on release; pulling the channel list in below
-  ~110 px tucks it away to width 0, the oval grip staying put (a plain click on it brings the
-  list back); double-click resets. The
+  in localStorage (boardLeftW / boardRightW) on release; the left one is free (no snapping —
+  settle it at any width down to 0, where the oval grip stays put and a plain click brings
+  the list back); double-click resets. The
   right column's cards scrollbox is capped at 45% height in board mode so the chat below it
   keeps its space. Both handles and the board's right column hide under 900 px like the old
   board chat did.
@@ -514,13 +514,31 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   on its own full-width row (the tools wrap again if needed — never make the strip or the bar
   an overflow container: the dice tray hangs off the strip absolutely and would be clipped).
   New top-bar controls must shrink or be shed by a rule; the bar must never spill over the
-  columns beside it (that was the cramped-overlap bug).
+  columns beside it (that was the cramped-overlap bug). The bar also carries the board's
+  text-channel chip (beside the title; shed at <=980 like the viewers) and, for whoever runs
+  the game, the magnet snap toggle next to the grid button (.board-icon-btn "on" gold state).
 - The board is one transformed div (translate + scale); panning and wheel-zoom only change
   it. Dragging a token uses pointer capture, patches the position at most every 140 ms and
-  snaps to the square middle on drop. dragstart is prevented on tokens and the stage: a
+  snaps to the square middle on drop — while the board's snap setting is on (snapPoint());
+  with it off, tokens land exactly where they're dropped. dragstart is prevented on tokens
+  and the stage: a
   native drag cancels the pointer sequence, which killed drags half-way.
 - Escape closes the board only when no modal, sheet or context menu is up (they close first),
   and it hides the ruler before it closes the board.
+- The board's own text channel is boards.channel_id (nullable; the column is added at startup
+  and cleared in channels.py's delete_channel like server.system_channel_id). It is what the
+  board's dice aim at: diceChannel = board.channel_id ?? the chat open beside the board, for
+  both posting tray rolls (rollDice) and watching live rolls to animate. The chip by the
+  title and the title menu's "Text Channel…" open the same context-menu picker (this server's
+  text channels, checked = current, "No Channel" clears). The PATCH refuses anything but a
+  text channel of the server.
+- Board keyboard: TOOL_KEYS (P pen, L line, S rect, C ellipse, T text, R ruler, A arrow) run
+  pickTool so they behave exactly like a toolbar click (the ruler drawing clears unless the
+  new tool is ruler); holding Space stashes the tool in prevToolRef, swaps to Select and
+  restores it on keyup — or on window blur, so a held Space can't strand you on Select. All
+  of it bails while a field has the caret or a modal/sheet/context menu is open. ChatInput's
+  type-anywhere-to-focus bails too while getState().boardView is set — that handler was what
+  used to steal P/L/S into the chat box.
 - A token drop keeps its snapped spot on screen until the server position matches (no
   rebound), and per-token PATCHes run one at a time with drag moves coalescing, so on a slow
   link an older move can't overtake the drop.

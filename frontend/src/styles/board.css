@@ -1030,14 +1030,55 @@ body.col-resizing * {
   font-size: 12px;
 }
 
+/* The board's own text channel, worn beside the title: its rolls post there. */
+.board-channel-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 150px;
+  padding: 4px 9px;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-floating) 60%, transparent);
+  color: var(--interactive-normal);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.board-channel-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-channel-chip:hover {
+  background: var(--bg-mod-hover);
+  color: var(--interactive-hover);
+}
+
+.board-channel-chip.unset {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 /* ---------- The top bar when its column is narrow ---------- */
 
 /* The side panels can squeeze this column right down: shed the least-needed
    controls first, then let the bar wrap onto a second row instead of spilling
    over its edges into the columns beside it. */
 
-@container (max-width: 1080px) {
+@container (max-width: 1240px) {
   .board-zoom-slider {
+    display: none;
+  }
+}
+
+/* The chip needs room the single-row bar only has on wide columns (it comes
+   back when the bar wraps, see below). */
+@container (max-width: 1120px) {
+  .board-channel-chip {
     display: none;
   }
 }
@@ -1072,5 +1113,10 @@ body.col-resizing * {
     order: 10;
     flex: 1 1 100%;
     flex-wrap: wrap;
+  }
+
+  /* Wrapped onto two rows, row one has room for the chip again. */
+  .board-channel-chip {
+    display: flex;
   }
 }

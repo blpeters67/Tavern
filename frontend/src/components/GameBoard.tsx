@@ -2,7 +2,7 @@
  * theater but for the table. A saved board per server with a background
  * picture, a grid, character tokens (green allies, grey neutrals, red
  * enemies), and a chat column beside it. */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { api, errorMessage, upload } from '../api/http';
 import { gateway } from '../api/gateway';
@@ -14,7 +14,7 @@ import { canControlBoard, displayName, myCharacters } from '../store/selectors';
 import { getState, useStore } from '../store/store';
 import { claimRollAnimation, roll as requestRoll } from '../lib/rolls';
 import type { Board, BoardDrawing, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
-import { MessageType } from '../store/types';
+import { MessageType, ChannelType } from '../store/types';
 import {
   Icon,
   mdiAccountPlus,
@@ -35,9 +35,11 @@ import {
   mdiCircleOutline,
   mdiFormatText,
   mdiImage,
+  mdiMagnet,
   mdiMinus,
   mdiPencil,
   mdiPlus,
+  mdiPound,
   mdiRectangleOutline,
   mdiRedo,
   mdiRuler,
@@ -571,6 +573,17 @@ const TokenView = memo(function TokenView({
 
 /** What the drawing tools paint. The server keeps the same shape. */
 type DrawKind = 'pen' | 'arrow' | 'line' | 'rect' | 'ellipse';
+
+/** Board keyboard shortcuts: the tool each letter picks (Space pans, see below). */
+const TOOL_KEYS: Record<string, 'select' | DrawKind | 'text' | 'ruler'> = {
+  a: 'arrow',
+  c: 'ellipse',
+  l: 'line',
+  p: 'pen',
+  r: 'ruler',
+  s: 'rect',
+  t: 'text',
+};
 type Shape = { kind: BoardDrawing['kind']; color: string; width: number; data: BoardDrawing['data'] };
 type Pt = { x: number; y: number };
 type Draft = { kind: DrawKind; from: Pt; to: Pt; points: [number, number][] };
@@ -678,6 +691,33 @@ function BoardTopBar({
   const users = useStore((s) => s.users);
   const [menuOpen, setMenuOpen] = useState(false);
   const board = sb.board;
+  // The board's own text channel: its rolls land there. The chip below the
+  // title shows it (falling back to "No channel") and opens this picker.
+  const boardChannelName = useStore((s) => (board?.channel_id != null ? (s.channels[board.channel_id]?.name ?? null) : null));
+  const pickerChannels = useStore(
+    useShallow((s) =>
+      Object.values(s.channels)
+        .filter((c) => c.server_id === serverId && c.type === ChannelType.TEXT)
+        .sort((a, b) => a.position - b.position || a.id - b.id),
+    ),
+  );
+  const setBoardChannel = (channelId: number | null) => {
+    if (!board) return;
+    api.patch(`/api/servers/${serverId}/board/boards/${board.id}`, { channel_id: channelId }).catch((err) => toast(errorMessage(err)));
+  };
+  const channelPicker = (close: () => void) => (
+    <>
+      <MenuItem label="No Channel" checked={board?.channel_id == null} onClick={() => { close(); setBoardChannel(null); }} />
+      {pickerChannels.map((c) => (
+        <MenuItem key={c.id} label={`# ${c.name ?? ''}`} checked={c.id === board?.channel_id} onClick={() => { close(); setBoardChannel(c.id); }} />
+      ))}
+    </>
+  );
+  const openChannelPicker = (e: ReactMouseEvent) => openContextMenu(e, channelPicker);
+  const toggleSnap = () => {
+    if (!board) return;
+    api.patch(`/api/servers/${serverId}/board/boards/${board.id}`, { snap: !board.snap }).catch((err) => toast(errorMessage(err)));
+  };
   return (
     <div className="board-top">
       <div className="board-title-wrap">
@@ -757,6 +797,17 @@ function BoardTopBar({
               }}
             />
             <MenuItem
+              label="Text Channel…"
+              icon={mdiPound}
+              onClick={(e) => {
+                setMenuOpen(false);
+                // MenuItem closes context menus right after onClick (layers.tsx),
+                // so ours has to open on the next tick.
+                const { clientX, clientY } = e;
+                window.setTimeout(() => openContextMenu({ clientX, clientY }, channelPicker), 0);
+              }}
+            />
+            <MenuItem
               label="Delete Board"
               danger
               icon={mdiTrashCanOutline}
@@ -792,6 +843,17 @@ function BoardTopBar({
           </div>
         )}
       </div>
+      {board && (
+        <button
+          className={`board-channel-chip${boardChannelName ? '' : ' unset'}`}
+          aria-label="Board text channel"
+          onClick={openChannelPicker}
+          {...tip(boardChannelName ? `Board rolls post to #${boardChannelName} — click to change` : "Pick the text channel this board's rolls post to", 'bottom')}
+        >
+          <Icon path={mdiPound} size={14} />
+          <span>{boardChannelName ?? 'No channel'}</span>
+        </button>
+      )}
       <div className="board-top-tools">{tools}</div>
       <div className="board-top-spacer" />
       {uploadPct !== null && <span className="board-uploading">Uploading… {Math.round(uploadPct * 100)}%</span>}
@@ -818,6 +880,17 @@ function BoardTopBar({
         <button className={`board-icon-btn ${gridOn ? 'on' : ''}`} aria-label="Toggle the grid" onClick={onGridToggle} {...tip(gridOn ? 'Hide the grid' : 'Show the grid', 'bottom')}>
           <Icon path={mdiViewGrid} size={17} />
         </button>
+        {canControl && board && (
+          <button
+            className={`board-icon-btn ${board.snap ? 'on' : ''}`}
+            aria-label="Toggle token snapping"
+            aria-pressed={board.snap}
+            onClick={toggleSnap}
+            {...tip(board.snap ? 'Tokens snap to the grid' : 'Tokens move freely', 'bottom')}
+          >
+            <Icon path={mdiMagnet} size={17} />
+          </button>
+        )}
       </div>
       <div className="board-viewers">
         {sb.viewers.map((id) => (users[id] ? <Avatar key={id} src={userAvatar(users[id])} size={22} {...tip(`${displayName(users[id])} has the board open`, 'bottom')} /> : null))}
@@ -939,11 +1012,13 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     };
   }, [serverId]);
 
-  // Every live roll in the open channel drops 3D dice on the board — rolls from
-  // the tray, from chat, and for everyone watching, since everyone plays the
-  // same message. The board claims the animation first, so the chat card lands
-  // straight onto its numbers instead of tumbling a second time.
-  const diceChannel = channel?.id ?? null;
+  // Every live roll in the board's channel drops 3D dice on the board — rolls
+  // from the tray, from chat, and for everyone watching, since everyone plays
+  // the same message. The board's own channel (top bar) wins over the open
+  // chat, so rolls keep landing there while you browse elsewhere. The board
+  // claims the animation first, so the chat card lands straight onto its
+  // numbers instead of tumbling a second time.
+  const diceChannel = board?.channel_id ?? channel?.id ?? null;
   useEffect(() => {
     if (diceChannel === null) return;
     return on('message-create', (m) => {
@@ -961,14 +1036,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     });
   }, [diceChannel]);
 
-  /** Roll from the tray: a plain NdX±M that lands in the open channel's chat. */
+  /** Roll from the tray: a plain NdX±M that lands in the board's channel. */
   const rollDice = useCallback(
     (sides: number) => {
-      if (!channel) return;
+      if (diceChannel === null) return;
       const expression = `${diceCount}d${sides}${diceMod ? (diceMod > 0 ? `+${diceMod}` : `${diceMod}`) : ''}`;
-      void requestRoll(channel.id, { kind: 'custom', expression });
+      void requestRoll(diceChannel, { kind: 'custom', expression });
     },
-    [channel, diceCount, diceMod],
+    [diceChannel, diceCount, diceMod],
   );
 
   const fit = useCallback(() => {
@@ -1394,8 +1469,18 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       });
   };
 
-  // Ctrl+Z / Ctrl+Shift+Z: undo and redo my own drawings; Escape clears the ruler first.
+  // Ctrl+Z / Ctrl+Shift+Z: undo and redo my own drawings; Escape clears the
+  // ruler first. Single letters pick tools (P pen, L line, S rectangle, C
+  // ellipse, T text, R ruler, A arrow) and holding Space pans with Select,
+  // putting the previous tool back on release — all asleep while a field has
+  // the caret or a menu or dialog is up.
+  const prevToolRef = useRef<'select' | DrawKind | 'text' | 'ruler' | null>(null);
   useEffect(() => {
+    const restoreTool = () => {
+      const back = prevToolRef.current;
+      prevToolRef.current = null;
+      if (back !== null) setTool(back);
+    };
     const onKey = (e: KeyboardEvent) => {
       const s = getState();
       const t = e.target as HTMLElement | null;
@@ -1418,10 +1503,34 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           void redo();
         }
       }
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (s.modals.length || s.sheetView || s.contextMenu) return;
+      if (e.key === ' ') {
+        // Held Space: pan with Select but keep the ruler drawing on screen.
+        e.preventDefault();
+        if (e.repeat || prevToolRef.current !== null) return;
+        prevToolRef.current = tool;
+        setTool('select');
+        return;
+      }
+      const next = TOOL_KEYS[e.key.toLowerCase()];
+      if (next) {
+        e.preventDefault();
+        pickTool(next);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ') restoreTool();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [ruler, undo, redo]);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', restoreTool);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', restoreTool);
+    };
+  }, [ruler, undo, redo, tool, pickTool]);
 
   if (!sb) return <div className="board-room" />;
   if (!board) {

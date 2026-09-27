@@ -831,9 +831,12 @@ export default function ChatInput({ channel }: { channel: Channel }) {
     window.addEventListener('tavern:focus-input', focus);
     window.addEventListener('tavern:insert-text', insert);
     window.addEventListener('tavern:add-files', addFiles);
-    // Start typing anywhere to jump into the box, like Discord.
+    // Start typing anywhere to jump into the box, like Discord — but not while
+    // the game board is up: there keys drive its tools, and chat starts when
+    // you click its text field.
     const onKey = (ev: globalThis.KeyboardEvent) => {
       if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.key.length !== 1) return;
+      if (getState().boardView) return;
       const t = ev.target as HTMLElement;
       if (t.closest('input, textarea, select, [contenteditable="true"], .modal-root, .settings-layer, .popout, .sheet-layer')) return;
       editorRef.current?.commands.focus('end');

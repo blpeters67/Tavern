@@ -167,8 +167,7 @@ function ColumnHandle({
     const delta = e.clientX - d.startX;
     let w = Math.round(side === 'left' ? d.startW + delta : d.startW - delta);
     w = Math.max(0, Math.min(side === 'left' ? 460 : 640, w));
-    if (side === 'left' && w < 110) w = 0;
-    else if (side === 'right') w = Math.max(240, w);
+    if (side === 'right') w = Math.max(240, w);
     d.last = w;
     d.moved = true;
     const el = target();

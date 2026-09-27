@@ -477,6 +477,9 @@ class Board(Base):
     # Grid: square size in board pixels, and whether tokens snap to it.
     grid_size: Mapped[int] = mapped_column(Integer, default=70)
     snap: Mapped[bool] = mapped_column(Boolean, default=True)
+    # The text channel this board's rolls land in (usually the game's channel,
+    # so rolls keep going there even while someone browses another channel).
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id", ondelete="SET NULL"))
     # The combat tracker: [{"id", "name", "token_id", "initiative", "current"}].
     tracker: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # Bumped on structural changes so clients can drop stale full states.

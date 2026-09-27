@@ -330,6 +330,8 @@ export interface Board {
   bg_height: number | null;
   grid_size: number;
   snap: boolean;
+  /** The text channel this board's rolls post to (top-bar chip picks it). */
+  channel_id: number | null;
   tokens: BoardToken[];
   drawings: BoardDrawing[];
   tracker: TrackerEntry[];

@@ -132,6 +132,7 @@ def board_full(db: Session, row: Board) -> dict[str, Any]:
         "bg_height": row.bg_height,
         "grid_size": row.grid_size,
         "snap": bool(row.snap),
+        "channel_id": row.channel_id,
         "tokens": tokens_payload(db, tokens),
         "drawings": [drawing_payload(d) for d in drawings],
         "tracker": list(row.tracker or []),

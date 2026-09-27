@@ -31,7 +31,7 @@ from ..config import settings
 from ..db import get_db, queue_event
 from ..deps import bad_request, current_user, forbidden, not_found, rate_limit
 from ..files import delete_files, save_board_image, save_image
-from ..models import Board, BoardDrawing, BoardToken, Character, User
+from ..models import Board, BoardDrawing, BoardToken, Channel, ChannelType, Character, User
 from ..permissions import ServerContext
 from ..security import random_key
 from ..services import load_server
@@ -134,6 +134,7 @@ class BoardPatch(BaseModel):
     name: str | None = Field(default=None, max_length=100)
     grid_size: int | None = Field(default=None, ge=20, le=400)
     snap: bool | None = None
+    channel_id: int | None = None
     tracker: list[dict[str, Any]] | None = None
 
 
@@ -155,6 +156,17 @@ def edit_board(server_id: int, board_id: int, body: BoardPatch, user: User = Dep
         changed = True
     if "snap" in fields and body.snap is not None:
         row.snap = bool(body.snap)
+        changed = True
+    if "channel_id" in fields:
+        # The board's own channel: its rolls land there. Must be a text channel
+        # of this server; None clears it.
+        if body.channel_id is None:
+            row.channel_id = None
+        else:
+            ch = db.get(Channel, body.channel_id)
+            if ch is None or ch.server_id != server_id or ch.type != ChannelType.TEXT:
+                raise bad_request("Pick a text channel from this server.")
+            row.channel_id = ch.id
         changed = True
     if "tracker" in fields and body.tracker is not None:
         row.tracker = _clean_tracker(body.tracker)

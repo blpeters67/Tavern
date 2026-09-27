@@ -9,10 +9,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db, queue_event
+from ..board import bump_rev, publish_state
 from ..deps import ApiError, current_user, forbidden, not_found
 from ..files import delete_files
 from ..models import (
     Attachment,
+    Board,
     Channel,
     ChannelRecipient,
     ChannelType,
@@ -142,6 +144,13 @@ def delete_channel(channel_id: int, user: User = Depends(current_user), db: Sess
             "SERVER_UPDATE",
             {"id": server.id, "name": server.name, "icon": server.icon, "owner_id": server.owner_id, "system_channel_id": None},
         )
+    # A board pointing at this channel lets go of it.
+    boards = list(db.scalars(select(Board).where(Board.server_id == channel.server_id, Board.channel_id == channel_id)))
+    for row in boards:
+        row.channel_id = None
+        bump_rev(row)
+    if server is not None and any(row.id == server.active_board_id for row in boards):
+        publish_state(db, server, members)
     db.delete(channel)
     queue_event(db, members, "CHANNEL_DELETE", {"id": channel_id, "server_id": channel.server_id})
     db.commit()

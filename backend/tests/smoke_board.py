@@ -149,6 +149,16 @@ def run(log_path: Path, data_dir: Path) -> None:
     assert b.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"grid_size": 50}).status_code == 403
     assert a.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"grid_size": 5}).status_code == 400
 
+    # --- the board's designated channel: a text channel of this server only ----
+    voice = ok(a.post(f"/api/servers/{sid}/channels", json={"name": "War Room", "type": 2}))
+    assert a.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"channel_id": voice["id"]}).status_code == 400
+    assert a.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"channel_id": 99999}).status_code == 400
+    ok(a.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"channel_id": general["id"]}))
+    st = gw_b.wait_for("BOARD_STATE", lambda s: s["board"] and s["board"]["channel_id"] == general["id"])
+    ok(a.patch(f"/api/servers/{sid}/board/boards/{bid}", json={"channel_id": None}))
+    st = gw_b.wait_for("BOARD_STATE", lambda s: s["board"] and s["board"]["channel_id"] is None)
+    print("board channel ok (text only, clears)")
+
     # --- several boards: new ones wait to be picked; deleting the active one falls back ----
     second = ok(a.post(f"/api/servers/{sid}/board/boards", json={"name": "Forest Road"}))
     st = gw_b.wait_for("BOARD_STATE", lambda s: len(s["boards"]) == 2)
