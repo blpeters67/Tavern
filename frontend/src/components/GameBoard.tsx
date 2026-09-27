@@ -1037,8 +1037,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       d.kind === 'pen'
         ? { kind: 'pen', color, width: 3, data: { points: d.points.map((p) => [r1(p[0]), r1(p[1])] as [number, number]) } }
         : { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
+    // The stroke belongs to the board (and history) it was drawn on: a save
+    // that lands after a map switch must not clear the new board's redo pile.
+    const gen = histGen.current;
+    const boardId = boardRef.current?.id ?? null;
     if (await postShape(payload)) {
-      resetHistory(false); // a fresh stroke starts a new undo line
+      if (boardId === (boardRef.current?.id ?? null) && histGen.current === gen) {
+        resetHistory(false); // a fresh stroke starts a new undo line
+      }
     }
   };
 

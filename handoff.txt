@@ -504,7 +504,9 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   history reset voids queued and in-flight actions (they cancel instead of touching another
   board), and a late completion can't repopulate a reset redo pile. A successful delete is
   also marked gone locally, so another quick Undo moves to the previous stroke without
-  waiting for the BOARD_DRAW_DELETE event.
+  waiting for the BOARD_DRAW_DELETE event. A stroke's save only starts a new undo line
+  when the same board (and history generation) is still up — a save landing after a map
+  switch must not clear the redo pile of the board you switched to.
 - A token drag starts from what is on screen: while a drop still awaits the server, the
   displayed spot wins over the older confirmed coordinates, so re-grabbing a just-dropped
   token never snaps it back. Each drop's 4 s fallback timer carries a sequence number, so an
