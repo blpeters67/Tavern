@@ -244,12 +244,17 @@ export default function MessageList({ channel }: { channel: Channel }) {
     tryAck();
   };
 
+  const hideRolls = useStore((s) => s.hideRolls);
+
   const rows = useMemo(() => {
     const out: ReactNode[] = [];
     if (!list) return out;
     let prev: Message | null = null;
     let newShown = false;
     for (const m of list) {
+      // Rolls the reader hid leave no trace at all: no row, no divider and
+      // no grouping break, so the rest of the conversation reads normally.
+      if (hideRolls && m.type === MessageType.ROLL) continue;
       const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
       const isNew = !newShown && newSince !== null && m.id > newSince && m.author_id !== meId;
       if (isNew) newShown = true;
@@ -265,7 +270,7 @@ export default function MessageList({ channel }: { channel: Channel }) {
       prev = m;
     }
     return out;
-  }, [list, newSince, meId, highlight]);
+  }, [list, newSince, meId, highlight, hideRolls]);
 
   const pendingRows = useMemo(() => {
     if (!pending?.length || cache?.hasMoreAfter) return null;

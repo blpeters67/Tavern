@@ -396,6 +396,12 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   15 and 30 s, while the channel is open at the bottom). If loadLatest fails with nothing on
   screen, the spinner stays and retryLatest() tries again, but only for errors worth
   retrying (no connection, 5xx, 429).
+- hideRolls (store.ts + actions.toggleHideRolls, localStorage tavern.hideRolls, default
+  off) is a local display preference, flipped by the dice button in ChatView's toolbar
+  (mdiDiceMultiple / mdiDiceMultipleOutline + aria-pressed). The rows loop in MessageList
+  skips ROLL messages whole — no divider, no grouping change, no New marker moved — so
+  history, live rolls and loadBefore pages all filter through the one path; the cache,
+  pagination and the board's dice are untouched.
 - MessageList keeps the view pinned to a message element when content above it changes
   (captureAnchor/restoreAnchor) and trims old messages from the top only while following the
   bottom. Sending while scrolled away jumps to the present.
@@ -496,6 +502,10 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   positions are stage coords (view + world * z, re-placed when the view changes), and the
   layer prunes by sb.viewers. Sends are throttled 70 ms from onStagePointerMove plus once on
   tool change; off (localStorage tavern.boardCursors, default on) neither renders nor sends.
+  Toggling off also sends op 13 with {hidden: true}: board.hide_cursor forgets the pointer,
+  the other viewers get a BOARD_CURSOR with hidden set (the client removes that element on
+  the spot), and joins no longer see it in their snapshot. Toggling back on re-publishes
+  the last known position right away (lastCursor keeps it).
 - BoardDice: BoardRoll.card carries {name, title, expression, total, avatar, color, outcome};
   cardTexture draws the plate under the dice (avatar circle with the roller's colour ring,
   "<name> rolled — <title>", then the expression, "=" and the total in gold — green/red
@@ -507,7 +517,12 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   every rendered frame; hidden until the card has faded in, hidden again once the fade
   starts). dismissNow() fades the layer (.dismissing, 200 ms) then cancels the raf /
   fadeTimer, clearWorld()s and draws one empty frame — the canvas keeps its last
-  picture otherwise. No new gateway op; the dismissal is local to whoever clicks.
+  picture otherwise. The dismissal is roll-scoped: dismissNow captures the roll it was
+  clicked on and its timer only clears the world if that roll is still the current one,
+  the arriving-roll effect cancels a pending timer (a new roll can land mid-fade and plays
+  on), and unmount clears it too. resize() calls placeDiceClose after its idle redraw, so
+  the ✕ rides the card through column drags. No new gateway op; the dismissal is local to
+  whoever clicks.
 - rollTargetChannel() (lib/rolls) prefers the OPEN BOARD's channel before the active
   channel, so rolls from a token's character sheet land where the map's dice land
   (diceChannel = board.channel_id ?? the chat channel). Rolling for someone else's character
@@ -537,6 +552,9 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   release; under ~48 px it snaps to 0 (cards fully hidden, grip stays right under the DM
   Lock), double-click resets to the natural height. The search results scroll themselves
   (.right-panel .search-results).
+- The left column is a container too (.sidebar has container-type: inline-size): under
+  180px its section + buttons (.section-add) hide and .section-title ellipsizes, so nothing
+  overlaps at any dragged width; the category + hides under 140px.
 - The board top bar adapts to its column with container queries (.board-shell is the
   container): the zoom slider drops at <=1080 px, viewer avatars at <=980, the title text and
   zoom % at <=780, and at <=740 the bar wraps onto two rows with the tool strip ordered last
@@ -564,7 +582,10 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 - Board keyboard: TOOL_KEYS (P pen, L line, S rect, C ellipse, T text, R ruler, A arrow) run
   pickTool so they behave exactly like a toolbar click (the ruler drawing clears unless the
   new tool is ruler); holding Space stashes the tool in prevToolRef, swaps to Select and
-  restores it on keyup — or on window blur, so a held Space can't strand you on Select. All
+  restores it on keyup — or on window blur, so a held Space can't strand you on Select.
+  Space also sets spaceRef, which makes onTokenDown bail before it grabs the drag: with
+  Space held a press over any token falls through to the stage and pans, and the token's
+  world position is untouched. All
   of it bails while a field has the caret or a modal/sheet/context menu is open. ChatInput's
   type-anywhere-to-focus bails too while getState().boardView is set — that handler was what
   used to steal P/L/S into the chat box.

@@ -175,6 +175,17 @@ class BoardManager:
         """The last pointer each viewer had on this server's board."""
         return {u: (x, y, t) for u, (x, y, t, _) in self._cursors.get(server_id, {}).items()}
 
+    def hide_cursor(self, server_id: int, user_id: int) -> list[int] | None:
+        """A viewer stopped sharing: forget the pointer (future snapshots
+        leave it out) and return who to tell to remove it — None when there
+        was nothing to remove or nobody to tell."""
+        users = self._viewers.get(server_id, {})
+        had = user_id in self._cursors.get(server_id, {})
+        self._forget_cursor(server_id, user_id)
+        if not had or user_id not in users:
+            return None
+        return [u for u in users if u != user_id]
+
     def _forget_cursor(self, server_id: int, user_id: int) -> None:
         cursors = self._cursors.get(server_id)
         if cursors is not None:

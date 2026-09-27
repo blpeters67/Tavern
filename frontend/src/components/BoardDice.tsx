@@ -929,6 +929,8 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     world.dieSize = Math.min(0.55, Math.max(0.14, (DIE_PX * VIS_W * (w / h)) / w));
     // While nothing is animating, a resize still needs one fresh frame.
     if (!world.raf && world.dice.length) renderer.render(scene, camera);
+    // The dismiss ✕ is placed from the frame: moving the layout moves it.
+    if (world.dice.length) placeDiceClose(world);
   };
   world.observer = new ResizeObserver(resize);
   world.observer.observe(host);
@@ -957,6 +959,7 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
   const wantedRef = useRef<BoardRoll | null>(null);
   const playingRef = useRef(false);
   const dismissRef = useRef(false);
+  const dismissTimerRef = useRef(0);
   const [dismissing, setDismissing] = useState(false);
   // Bumped on unmount so an initialization that is still in flight knows the
   // board is gone and disposes itself instead of animating a dead canvas.
@@ -1024,6 +1027,12 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
 
   useEffect(() => {
     if (!roll) return;
+    // A new roll cancels any dismissal still fading out: the old timer must
+    // never erase dice that belong to the roll that just arrived.
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = 0;
+    }
     dismissRef.current = false;
     setDismissing(false);
     // The chat card already carries the result; the drop is decoration, so it
@@ -1037,6 +1046,7 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
   const dismissNow = () => {
     const world = worldRef.current;
     if (!world || dismissRef.current) return;
+    const rollAtClick = wantedRef.current;
     dismissRef.current = true;
     setDismissing(true);
     // The raf stops with the world, so hide the ✕ ourselves; the next roll's
@@ -1046,24 +1056,29 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
       el.style.opacity = '0';
       el.style.pointerEvents = 'none';
     }
-    window.setTimeout(() => {
-      if (world.raf) cancelAnimationFrame(world.raf);
-      world.raf = 0;
-      if (world.fadeTimer) {
-        clearTimeout(world.fadeTimer);
-        world.fadeTimer = 0;
-      }
-      clearWorld(world);
-      // clearWorld just empties the scene — without this frame the canvas
-      // would keep showing the last thing drawn.
-      world.renderer.render(world.scene, world.camera);
+    dismissTimerRef.current = window.setTimeout(() => {
+      dismissTimerRef.current = 0;
       dismissRef.current = false;
       setDismissing(false);
+      // A newer roll took the world over while this one faded: leave it be.
+      const live = worldRef.current;
+      if (!live || live !== world || wantedRef.current !== rollAtClick) return;
+      if (live.raf) cancelAnimationFrame(live.raf);
+      live.raf = 0;
+      if (live.fadeTimer) {
+        clearTimeout(live.fadeTimer);
+        live.fadeTimer = 0;
+      }
+      clearWorld(live);
+      // clearWorld just empties the scene — without this frame the canvas
+      // would keep showing the last thing drawn.
+      live.renderer.render(live.scene, live.camera);
     }, 220);
   };
 
   useEffect(
     () => () => {
+      if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current);
       genRef.current += 1; // stop an in-flight initialization from landing
       const world = worldRef.current;
       worldRef.current = null;

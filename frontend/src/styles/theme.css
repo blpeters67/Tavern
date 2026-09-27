@@ -159,12 +159,28 @@
   text-transform: uppercase;
   color: var(--gold-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .section-add {
   display: flex;
   color: var(--interactive-normal);
   border-radius: 3px;
+}
+
+/* Too narrow for a heading AND its +: the button goes, the heading keeps
+   its room (the same actions live in the section's right-click menu). */
+@container (max-width: 180px) {
+  .section-add {
+    display: none;
+  }
+}
+
+@container (max-width: 140px) {
+  .category-add {
+    display: none;
+  }
 }
 
 .section-add:hover {

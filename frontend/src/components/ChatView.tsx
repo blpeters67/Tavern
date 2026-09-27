@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { api, errorMessage } from '../api/http';
 import { userAvatar } from '../lib/avatars';
 import { P } from '../lib/permissions';
-import { jumpToMessage, openModal, setPinned, toggleMemberList } from '../store/actions';
+import { jumpToMessage, openModal, setPinned, toggleHideRolls, toggleMemberList } from '../store/actions';
 import { channelTitle, dmPartner, myChannelPerms } from '../store/selectors';
 import { getState, setState, useStore } from '../store/store';
 import type { Channel, Message } from '../store/types';
@@ -10,7 +10,7 @@ import { ChannelType } from '../store/types';
 import ChannelIcon from './ChannelIcon';
 import ChatInput from './ChatInput';
 import { GroupIcon } from './HomeSidebar';
-import { Icon, mdiAccountMultiple, mdiClose, mdiMenu, mdiPin, mdiUpload } from './icons';
+import { Icon, mdiAccountMultiple, mdiClose, mdiDiceMultiple, mdiDiceMultipleOutline, mdiMenu, mdiPin, mdiUpload } from './icons';
 import { Modal, Popout, tip, usePopout } from './layers';
 import { MessageItem } from './Message';
 import MessageList from './MessageList';
@@ -109,6 +109,7 @@ export function PanelToggle() {
 function ChatHeader({ channel, board }: { channel: Channel; board?: boolean }) {
   const partner = useStore((s) => dmPartner(s, channel));
   const title = useStore((s) => channelTitle(s, channel));
+  const hideRolls = useStore((s) => s.hideRolls);
   const pins = usePopout();
   const pinButton = useRef<HTMLButtonElement>(null);
 
@@ -147,6 +148,15 @@ function ChatHeader({ channel, board }: { channel: Channel; board?: boolean }) {
         )}
       </div>
       <div className="chat-header-toolbar">
+        <button
+          className={`header-button ${hideRolls ? 'active' : ''}`}
+          aria-label={hideRolls ? 'Show dice rolls' : 'Hide dice rolls'}
+          aria-pressed={hideRolls}
+          onClick={toggleHideRolls}
+          {...tip(hideRolls ? 'Show dice rolls in this chat (they are hidden right now)' : 'Hide dice rolls in this chat', 'bottom')}
+        >
+          <Icon path={hideRolls ? mdiDiceMultipleOutline : mdiDiceMultiple} size={24} />
+        </button>
         <button
           ref={pinButton}
           className={`header-button ${pins.isOpen ? 'active' : ''}`}

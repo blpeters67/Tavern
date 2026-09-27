@@ -177,6 +177,12 @@ export function toggleMemberList() {
   persistUi();
 }
 
+/** Local display preference: hides every dice-roll message from chat. */
+export function toggleHideRolls() {
+  setState((s) => ({ hideRolls: !s.hideRolls }));
+  persistUi();
+}
+
 export function toggleCategory(id: number) {
   setState((s) => ({ collapsedCategories: { ...s.collapsedCategories, [id]: !s.collapsedCategories[id] } }));
   persistUi();

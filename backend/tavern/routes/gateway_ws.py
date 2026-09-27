@@ -107,10 +107,24 @@ async def _board_view(conn: Connection, d: dict) -> None:
 
 async def _board_cursor(conn: Connection, d: dict) -> None:
     server_id = d.get("server_id")
+    if not isinstance(server_id, int):
+        return
+    if d.get("hidden"):
+        # Sharing off: the pointer is forgotten and the others are told to
+        # drop it, so a frozen ghost never lingers on their maps.
+        targets = board.hide_cursor(server_id, conn.user_id)
+        if not targets:
+            return
+        gateway.publish(
+            targets,
+            "BOARD_CURSOR",
+            {"server_id": server_id, "user_id": conn.user_id, "hidden": True},
+        )
+        return
     x = d.get("x")
     y = d.get("y")
     tool = d.get("tool")
-    if not isinstance(server_id, int) or isinstance(x, bool) or isinstance(y, bool):
+    if isinstance(x, bool) or isinstance(y, bool):
         return
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return

@@ -141,6 +141,8 @@ export interface State {
   // UI
   activeChannelId: number | null;
   memberListOpen: boolean;
+  /** Local display preference: dice-roll messages hidden from every chat. */
+  hideRolls: boolean;
   mobileNavOpen: boolean;
   mobileMembersOpen: boolean;
   settings: SettingsTarget | null;
@@ -249,6 +251,7 @@ export const useStore = create<State>(() => ({
   boardView: null,
   activeChannelId: null,
   memberListOpen: load<boolean>('memberList', true),
+  hideRolls: load<boolean>('hideRolls', false),
   mobileNavOpen: false,
   mobileMembersOpen: false,
   settings: null,
@@ -344,6 +347,7 @@ export function persistUi() {
   save('lastChannels', s.lastChannelByServer);
   save('collapsed', s.collapsedCategories);
   save('memberList', s.memberListOpen);
+  save('hideRolls', s.hideRolls);
   save('persona', s.globalPersona);
   save('listening', s.listening);
   save('seated', s.seated);
@@ -987,7 +991,7 @@ const handlers: Record<string, Handler> = {
 
   // Live pointers: nothing to store — the board renders them straight from the
   // event (they move too often to live in React state).
-  BOARD_CURSOR(d: { server_id: number; user_id: number; x: number; y: number; tool: string }) {
+  BOARD_CURSOR(d: { server_id: number; user_id: number; x: number; y: number; tool: string; hidden?: boolean }) {
     emit('board-cursor', d);
   },
 

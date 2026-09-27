@@ -200,6 +200,20 @@ def run(log_path: Path, data_dir: Path) -> None:
     gw_b.send(12, {"server_id": sid, "viewing": True})
     snap = gw_b.wait_for("BOARD_CURSORS", lambda v: any(c["user_id"] == me_a for c in v["cursors"]))
     assert snap["server_id"] == sid and all(c["user_id"] != me_c["id"] for c in snap["cursors"])
+    # Sharing off: the others are told to drop the pointer and a fresh joiner's
+    # snapshot leaves it out; sharing on again publishes a spot right away.
+    gw_a.send(13, {"server_id": sid, "hidden": True})
+    hid = gw_b.wait_for("BOARD_CURSOR", lambda v: v["user_id"] == me_a and v.get("hidden") is True)
+    assert hid["server_id"] == sid
+    gw_c.send(12, {"server_id": sid, "viewing": True})
+    gw_c.wait_for("BOARD_VIEWERS", lambda v: me_c["id"] in v["user_ids"])
+    time.sleep(0.3)
+    assert not any(t == "BOARD_CURSORS" and any(c["user_id"] == me_a for c in d["cursors"]) for t, d in gw_c.events), "hidden cursor leaked into a snapshot"
+    gw_a.send(13, {"server_id": sid, "x": 88.5, "y": 99.5, "tool": "pen"})
+    back = gw_b.wait_for("BOARD_CURSOR", lambda v: v["user_id"] == me_a and v.get("x") == 88.5)
+    assert back.get("hidden") is not True and back["tool"] == "pen"
+    print("cursor hide ok (removal relayed, snapshot clean, resume publishes)")
+    gw_c.send(12, {"server_id": sid, "viewing": False})
     gw_a.send(12, {"server_id": sid, "viewing": False})
     gw_b.send(12, {"server_id": sid, "viewing": False})
     gw_a.wait_for("BOARD_VIEWERS", lambda v: not v["user_ids"])

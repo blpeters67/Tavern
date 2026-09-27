@@ -1395,6 +1395,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
 
   const onTokenDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => {
     if (e.button !== 0) return;
+    if (spaceRef.current) return; // Space pans: the stage takes the drag, even over a token
     if (!canMoveToken(t)) return; // let the board pan from over a token you can't move
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1508,8 +1509,12 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   // putting the previous tool back on release — all asleep while a field has
   // the caret or a menu or dialog is up.
   const prevToolRef = useRef<'select' | DrawKind | 'text' | 'ruler' | null>(null);
+  // Held Space = temporary pan: it must beat a token's own drag, not just
+  // the Select tool's empty-map pan.
+  const spaceRef = useRef(false);
   useEffect(() => {
     const restoreTool = () => {
+      spaceRef.current = false;
       const back = prevToolRef.current;
       prevToolRef.current = null;
       if (back !== null) setTool(back);
@@ -1545,6 +1550,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       if (e.key === ' ') {
         // Held Space: pan with Select but keep the ruler drawing on screen.
         e.preventDefault();
+        spaceRef.current = true;
         if (e.repeat || prevToolRef.current !== null) return;
         prevToolRef.current = tool;
         setTool('select');
@@ -1574,7 +1580,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   cursorsOnRef.current = cursorsOn;
   const cursorLayer = useRef<HTMLDivElement | null>(null);
   const cursorMap = useRef(new Map<number, CursorEntry>());
-  const lastCursor = useRef({ at: 0, cx: 0, cy: 0 });
+  const lastCursor = useRef({ at: 0, cx: 0, cy: 0, has: false });
   const toolRef = useRef(tool);
 
   /** Screen spot for a pointer at board coordinates (they move with pan/zoom). */
@@ -1623,13 +1629,26 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     [placeCursor],
   );
 
+  /** Drop a viewer's pointer: they stopped sharing or left the board. */
+  const removeCursor = useCallback((id: number) => {
+    const c = cursorMap.current.get(id);
+    if (c) {
+      c.el.remove();
+      cursorMap.current.delete(id);
+    }
+  }, []);
+
   useEffect(
     () =>
-      on('board-cursor', (d: { server_id: number; user_id: number; x: number; y: number; tool: string }) => {
+      on('board-cursor', (d: { server_id: number; user_id: number; x: number; y: number; tool: string; hidden?: boolean }) => {
         if (!cursorsOnRef.current || d.server_id !== serverId) return;
+        if (d.hidden) {
+          removeCursor(d.user_id);
+          return;
+        }
         applyCursor(d.user_id, d.x, d.y, d.tool);
       }),
-    [serverId, applyCursor],
+    [serverId, applyCursor, removeCursor],
   );
   useEffect(
     () =>
@@ -1666,10 +1685,20 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   }, [cursorsOn]);
 
   const toggleCursors = () => {
-    setCursorsOn((v) => {
-      save('boardCursors', !v);
-      return !v;
-    });
+    const next = !cursorsOn;
+    setCursorsOn(next);
+    save('boardCursors', next);
+    if (!next) {
+      // Sharing off: the server forgets my pointer (so it never shows up in
+      // a snapshot) and tells the others to drop it.
+      gateway.send(13, { server_id: serverId, hidden: true });
+      return;
+    }
+    // Sharing on: publish where I last was, so the others see me at once.
+    const last = lastCursor.current;
+    if (!last.has) return;
+    const w = toWorld(last.cx, last.cy);
+    gateway.send(13, { server_id: serverId, x: Math.round(w.x * 10) / 10, y: Math.round(w.y * 10) / 10, tool: toolRef.current });
   };
 
   /** Send my pointer to the board (throttled); the server drops it when nobody
@@ -1679,7 +1708,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       if (!cursorsOnRef.current) return;
       const now = performance.now();
       if (!force && now - lastCursor.current.at < 70) return;
-      lastCursor.current = { at: now, cx, cy };
+      lastCursor.current = { at: now, cx, cy, has: true };
       const w = toWorld(cx, cy);
       gateway.send(13, { server_id: serverId, x: Math.round(w.x * 10) / 10, y: Math.round(w.y * 10) / 10, tool: toolRef.current });
     },

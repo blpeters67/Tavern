@@ -234,6 +234,9 @@
   background: var(--bg-secondary);
   border-top-left-radius: 8px;
   overflow: hidden;
+  /* The section headers react to THIS column's width, not the window's
+     (the splitter is free, so a media query would never fire). */
+  container-type: inline-size;
 }
 
 .sidebar-inner {
