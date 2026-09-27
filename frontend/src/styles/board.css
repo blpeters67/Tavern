@@ -928,6 +928,38 @@ body.col-resizing * {
   pointer-events: none;
 }
 
+/* The dismiss ✕ that rides the result card. It hangs off <body> (fixed, above
+   the sheet drawer and other app layers) and the tick keeps its position. */
+.board-dice-x {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 950;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(15, 17, 23, 0.85);
+  color: rgba(255, 255, 255, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.board-dice-x:hover {
+  color: var(--gold);
+  border-color: var(--gold-dim);
+  background: rgba(22, 24, 33, 0.95);
+}
+.board-dice-layer.dismissing {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
 .board-dice-wrap {
   position: relative;
 }

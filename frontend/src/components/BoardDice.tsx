@@ -8,9 +8,14 @@
  * Every die is generated here — geometry and textures (pips for the cube,
  * numbers for the rest). Nothing is fetched, so the layer costs nothing until
  * dice are actually used, and there are no third-party assets to credit.
+ *
+ * A little ✕ rides the card's top-right corner so a roll can be knocked off
+ * the screen without waiting for the fade.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store/store';
+import { tip } from './layers';
 
 /** Same preference check the chat dice use before animating. */
 const reduceMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -599,6 +604,7 @@ interface World {
   start: number;
   dieSize: number;
   observer: ResizeObserver;
+  closeEl: HTMLElement | null;
 }
 
 const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
@@ -819,6 +825,7 @@ function tick(world: World) {
   if (gone) clearWorld(world);
 
   world.renderer.render(world.scene, world.camera);
+  placeDiceClose(world);
   if (!world.dice.length) {
     world.raf = 0;
     return;
@@ -840,6 +847,40 @@ function tick(world: World) {
   world.raf = requestAnimationFrame(() => tick(world));
 }
 
+let _cv: import('three').Vector3[] | null = null;
+
+/** Keep the dismiss ✕ on the result card's top-right corner while it's up. */
+function placeDiceClose(world: World) {
+  const el = world.closeEl;
+  if (!el) return;
+  const spr = world.label;
+  if (!spr || spr.material.opacity < 0.85) {
+    el.style.opacity = '0';
+    el.style.pointerEvents = 'none';
+    return;
+  }
+  const T = world.T;
+  if (!_cv) _cv = [new T.Vector3(), new T.Vector3(), new T.Vector3()];
+  const [right, up, v] = _cv;
+  right.setFromMatrixColumn(world.camera.matrixWorld, 0);
+  up.setFromMatrixColumn(world.camera.matrixWorld, 1);
+  // The card art: a 900×200 plate whose top-right corner sits at (872, 20).
+  v.copy(spr.position)
+    .addScaledVector(right, spr.scale.x * (872 / 900 - 0.5))
+    .addScaledVector(up, spr.scale.y * (0.5 - 20 / 200))
+    .project(world.camera);
+  const w = world.renderer.domElement.clientWidth;
+  const h = world.renderer.domElement.clientHeight;
+  // The button hangs off the document (so the sheet drawer and other layers
+  // can't bury it), and that makes its coordinates viewport ones: the dice
+  // layer's origin plus the projected point.
+  const lr = world.host.getBoundingClientRect();
+  el.style.left = `${(lr.left + (v.x * 0.5 + 0.5) * w).toFixed(1)}px`;
+  el.style.top = `${(lr.top + (0.5 - v.y * 0.5) * h).toFixed(1)}px`;
+  el.style.opacity = '1';
+  el.style.pointerEvents = 'auto';
+}
+
 async function ensureWorld(host: HTMLElement): Promise<World> {
   const T = await loadThree();
   const renderer = new T.WebGLRenderer({ alpha: true, antialias: true });
@@ -847,6 +888,7 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
   renderer.setClearAlpha(0);
   renderer.domElement.style.position = 'absolute';
   renderer.domElement.style.inset = '0';
+  renderer.domElement.setAttribute('aria-hidden', 'true');
   host.appendChild(renderer.domElement);
   const scene = new T.Scene();
   const camera = new T.PerspectiveCamera(30, 1, 0.1, 40);
@@ -873,6 +915,7 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     start: 0,
     dieSize: 0.36,
     observer: null as unknown as ResizeObserver,
+    closeEl: null,
   };
   const resize = () => {
     const r = host.getBoundingClientRect();
@@ -909,9 +952,12 @@ function disposeWorld(world: World) {
 
 export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const worldRef = useRef<World | null>(null);
   const wantedRef = useRef<BoardRoll | null>(null);
   const playingRef = useRef(false);
+  const dismissRef = useRef(false);
+  const [dismissing, setDismissing] = useState(false);
   // Bumped on unmount so an initialization that is still in flight knows the
   // board is gone and disposes itself instead of animating a dead canvas.
   const genRef = useRef(0);
@@ -925,6 +971,7 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
     try {
       let world = worldRef.current;
       if (!world || world.host !== host) worldRef.current = world = await ensureWorld(host);
+      world.closeEl = closeRef.current;
       if (gen !== genRef.current) {
         disposeWorld(world);
         if (worldRef.current === world) worldRef.current = null;
@@ -977,12 +1024,43 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
 
   useEffect(() => {
     if (!roll) return;
+    dismissRef.current = false;
+    setDismissing(false);
     // The chat card already carries the result; the drop is decoration, so it
     // waits for the same preferences the chat dice wait for.
     if (!(useStore.getState().me?.settings.dice_animations ?? true) || reduceMotion()) return;
     wantedRef.current = roll;
     void play.current();
   }, [roll]);
+
+  /** Knock the roll off screen now instead of waiting out the fade. */
+  const dismissNow = () => {
+    const world = worldRef.current;
+    if (!world || dismissRef.current) return;
+    dismissRef.current = true;
+    setDismissing(true);
+    // The raf stops with the world, so hide the ✕ ourselves; the next roll's
+    // tick brings it back.
+    const el = closeRef.current;
+    if (el) {
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+    }
+    window.setTimeout(() => {
+      if (world.raf) cancelAnimationFrame(world.raf);
+      world.raf = 0;
+      if (world.fadeTimer) {
+        clearTimeout(world.fadeTimer);
+        world.fadeTimer = 0;
+      }
+      clearWorld(world);
+      // clearWorld just empties the scene — without this frame the canvas
+      // would keep showing the last thing drawn.
+      world.renderer.render(world.scene, world.camera);
+      dismissRef.current = false;
+      setDismissing(false);
+    }, 220);
+  };
 
   useEffect(
     () => () => {
@@ -994,5 +1072,27 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
     [],
   );
 
-  return <div className="board-dice-layer" ref={hostRef} aria-hidden="true" />;
+  return (
+    <div className={`board-dice-layer${dismissing ? ' dismissing' : ''}`} ref={hostRef}>
+      {roll &&
+        createPortal(
+          <button
+            type="button"
+            className="board-dice-x"
+            ref={closeRef}
+            aria-label="Dismiss the roll"
+            onClick={dismissNow}
+            {...tip('Dismiss the roll', 'bottom')}
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
+              />
+            </svg>
+          </button>,
+          document.body,
+        )}
+    </div>
+  );
 }

@@ -502,6 +502,17 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   when a DC settles it). A roll where any die dropped (advantage picks) paints the kept die
   with a green emissive and gives dropped dice base opacity 0.34 (Die.base multiplies every
   fade so they stay ghostly).
+  The card carries a small dismiss ✕ (BoardDiceOverlay closeRef → World.closeEl;
+  placeDiceClose projects the plate's top-right corner — texture (872, 20) of 900×200 —
+  every rendered frame; hidden until the card has faded in, hidden again once the fade
+  starts). dismissNow() fades the layer (.dismissing, 200 ms) then cancels the raf /
+  fadeTimer, clearWorld()s and draws one empty frame — the canvas keeps its last
+  picture otherwise. No new gateway op; the dismissal is local to whoever clicks.
+- rollTargetChannel() (lib/rolls) prefers the OPEN BOARD's channel before the active
+  channel, so rolls from a token's character sheet land where the map's dice land
+  (diceChannel = board.channel_id ?? the chat channel). Rolling for someone else's character
+  is refused server-side (routes/rolls.py: owner or DM only) and the sheet's Rollable renders
+  readonly when the API's can_edit flag is false, so players only ever roll their own.
 - The board is a main VIEW, not an overlay: AppShell renders BoardRoom whenever the open
   board's server is the current one (boardView.serverId === server.id, community page wins),
   so the left channel list and the right column stay in place. The middle's chat is gone

@@ -115,6 +115,15 @@ export function rollTargetChannel(serverId: number | null): number | null {
   const s = getState();
   const active = s.activeChannelId !== null ? s.channels[s.activeChannelId] : undefined;
   const textish = (type: number) => type === ChannelType.TEXT || type === ChannelType.DM || type === ChannelType.GROUP_DM;
+  // While a board is open, sheet rolls land where the board's dice land: its
+  // own text channel when it has one (that's what the map watches for rolls),
+  // otherwise the chat beside it, same as the board's dice tray.
+  const bv = s.boardView;
+  if (bv) {
+    const b = s.board[bv.serverId]?.board;
+    const c = b?.channel_id != null ? s.channels[b.channel_id] : undefined;
+    if (c && textish(c.type) && (serverId === null || c.server_id === serverId)) return c.id;
+  }
   if (active && textish(active.type) && (serverId === null || active.server_id === serverId)) return active.id;
   if (serverId !== null) {
     const last = s.lastChannelByServer[serverId];
