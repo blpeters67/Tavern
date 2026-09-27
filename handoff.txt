@@ -403,9 +403,15 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   history, live rolls and loadBefore pages all filter through the one path; the cache,
   pagination and the board's dice are untouched. Two follow-ups ride along: checkFill()
   (MessageList) pulls the previous page whenever the loaded rows don't fill the scroller
-  (hidden rolls can leave nothing to scroll, so no scroll event would ever fire) — it
-  backs off when a round adds nothing, watches the box with a ResizeObserver, and stops
-  when the list scrolls or hasMoreBefore clears. And a jump to a hidden roll stays
+  (hidden rolls can leave nothing to scroll, so no scroll event would ever fire). It
+  measures progress by the OLDEST id (at the 250-message window a page in trims the
+  newest end, so the length stands still while the window walks back), retries a stalled
+  round on a timer — the wait escalates 2.5s→20s and then the check actually re-attempts
+  the fetch — and watches the box with a ResizeObserver. While it walks, fillActive owns
+  the view (onScroll stands down, the layout effect shows the newest page pulled in) so
+  stray scroll events from content insertion can't start a forward/back ping-pong; it
+  enters only from the present (no hasMoreAfter) and clears when the list scrolls or
+  hasMoreBefore clears. And a jump to a hidden roll stays
   possible: the skip honors revealId (jump?.messageId ?? revealedRoll), the jump effect
   sets revealedRoll with a 2400 ms timer so the row outlives the pending jump that would
   otherwise take it off screen in the same commit.

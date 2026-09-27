@@ -78,6 +78,8 @@ export default function MessageList({ channel }: { channel: Channel }) {
   const atBottom = useRef(true);
   const snapshot = useRef({ height: 0, firstId: 0 });
   const anchors = useRef<Anchor[]>([]);
+  const fillRetry = useRef(0);
+  const fillActive = useRef(false);
   const [highlight, setHighlight] = useState<number | null>(null);
   // While you're being shown a roll (a jump just landed on one), hide-rolls
   // lets its row through; it slips back under the filter once the moment passes.
@@ -114,6 +116,7 @@ export default function MessageList({ channel }: { channel: Channel }) {
   useEffect(
     () => () => {
       if (revealTimer.current) window.clearTimeout(revealTimer.current);
+      if (fillRetry.current) window.clearTimeout(fillRetry.current);
     },
     [],
   );
@@ -178,7 +181,8 @@ export default function MessageList({ channel }: { channel: Channel }) {
     const el = scroller.current;
     if (!el) return;
     const firstId = list?.[0]?.id ?? 0;
-    if (!jump) {
+    if (fillActive.current) el.scrollTop = 0; // the walk shows what it pulled in
+    else if (!jump) {
       if (atBottom.current) el.scrollTop = el.scrollHeight;
       else if (!restoreAnchor() && snapshot.current.firstId && firstId < snapshot.current.firstId) {
         el.scrollTop += el.scrollHeight - snapshot.current.height;
@@ -252,10 +256,20 @@ export default function MessageList({ channel }: { channel: Channel }) {
     const c = getState().messages[channel.id];
     if (!el || !c) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    follow(distance < 30 && !c.hasMoreAfter, distance < 30);
-    snapshot.current.height = el.scrollHeight;
-    if (el.scrollTop < 600 && c.hasMoreBefore && !c.loadingBefore && c.loaded) void loadBefore(channel.id);
-    if (distance < 600 && c.hasMoreAfter && !c.loadingAfter) void loadAfter(channel.id);
+    // While the auto-fill walks back (a list too short to scroll), it owns the
+    // loading: scroll events fired by content insertion would otherwise flip
+    // the reading state and start a forward/back ping-pong with its loads.
+    if (!fillActive.current) {
+      follow(distance < 30 && !c.hasMoreAfter, distance < 30);
+      snapshot.current.height = el.scrollHeight;
+      if (el.scrollTop < 600 && c.hasMoreBefore && !c.loadingBefore && c.loaded) void loadBefore(channel.id);
+      // Pull newer pages near the bottom of a tall list, or right at the end
+      // of a short one: a mid-history window slides by trim, and a stray
+      // scroll event (browsers fire one when content is inserted) must not
+      // slide it while the reader sits at the top.
+      const range = el.scrollHeight - el.clientHeight;
+      if (c.hasMoreAfter && !c.loadingAfter && ((distance < 600 && range > 600) || (distance < 30 && range > 4))) void loadAfter(channel.id);
+    }
     captureAnchor();
     tryAck();
   };
@@ -272,17 +286,54 @@ export default function MessageList({ channel }: { channel: Channel }) {
    * scrolls or the channel runs out). A round that added nothing backs off,
    * so a failing fetch can't spin.
    */
-  const fillCheck = useRef({ at: 0, len: -1 });
+  const fillCheck = useRef({ firstId: -1, at: 0, tries: 0 });
   const checkFill = useCallback(() => {
+    if (fillRetry.current) {
+      window.clearTimeout(fillRetry.current);
+      fillRetry.current = 0;
+    }
     const el = scroller.current;
     const c = getState().messages[channel.id];
-    if (!el || !c || !c.loaded || c.loadingBefore || !c.hasMoreBefore) return;
-    if (el.scrollHeight - el.clientHeight > 4) return; // it scrolls: onScroll's job
-    const now = Date.now();
-    if (c.list.length === fillCheck.current.len && now - fillCheck.current.at < 2500) return;
-    fillCheck.current = { at: now, len: c.list.length };
+    const active = fillActive.current;
+    if (!el || !c || !c.loaded || !c.list.length || (!c.hasMoreBefore && !c.loadingBefore)) {
+      fillActive.current = false;
+      return;
+    }
+    if (c.loadingBefore) return; // a round is out: stay in charge until it lands
+    if (el.scrollHeight - el.clientHeight > 4) {
+      fillActive.current = false; // it scrolls: onScroll's job from here on
+      return;
+    }
+    // Enter only from the present (nothing newer below): a mid-history window
+    // slides by trim, and a walk-back there would fight whoever is reading.
+    if (!active && c.hasMoreAfter) return;
+    // Progress is the OLDEST id, not the list length: at the 250-message window
+    // a page in trims the newest end, so the length stands still while the
+    // window walks back. A round that didn't move the oldest id retries (a
+    // failed fetch, a server still waking) instead of stopping for good.
+    const firstId = c.list[0].id;
+    const st = fillCheck.current;
+    if (firstId === st.firstId) {
+      // No progress since the last attempt: wait out the backoff, then try
+      // the fetch again (the timer only wakes this check; the attempt below
+      // is what actually retries).
+      const wait = Math.min(2500 * (st.tries + 1), 20000);
+      const elapsed = Date.now() - st.at;
+      if (elapsed < wait) {
+        fillRetry.current = window.setTimeout(checkFill, wait - elapsed);
+        return;
+      }
+      fillCheck.current = { firstId, at: Date.now(), tries: st.tries + 1 };
+    } else {
+      fillCheck.current = { firstId, at: Date.now(), tries: 0 };
+    }
+    // The chain owns the view while it walks: stop following the bottom
+    // (there is nothing worth following there yet) so its loads aren't
+    // re-aimed at the present between rounds.
+    fillActive.current = true;
+    follow(false);
     void loadBefore(channel.id);
-  }, [channel.id]);
+  }, [channel.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     checkFill();
