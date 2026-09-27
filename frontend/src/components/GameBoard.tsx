@@ -882,6 +882,18 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   // Undo and redo run one at a time, in press order, so a quick second press
   // acts on the next entry instead of re-submitting the same one.
   const histRef = useRef<Promise<void>>(Promise.resolve());
+  // A press belongs to the board (and history generation) it was made on: a
+  // reset or a map switch voids queued/in-flight actions instead of letting
+  // them touch whatever is open later. Gone ids are marked locally the moment
+  // a delete succeeds, so the next press moves on before the live event lands.
+  const histGen = useRef(0);
+  const goneRef = useRef<Set<number>>(new Set());
+  const resetHistory = useCallback((clearGone: boolean) => {
+    histGen.current += 1;
+    redoRef.current = [];
+    if (clearGone) goneRef.current = new Set();
+    setRedoCount(0);
+  }, []);
   const patchQueues = useRef<Map<number, { running: boolean; queue: { body: Record<string, unknown>; done?: (ok: boolean) => void }[] }>>(new Map());
   const board = sb?.board ?? null;
   boardRef.current = board;
@@ -947,9 +959,8 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
 
   // Redo belongs to one board: switching maps starts a clean history.
   useEffect(() => {
-    redoRef.current = [];
-    setRedoCount(0);
-  }, [board?.id]);
+    resetHistory(true);
+  }, [board?.id, resetHistory]);
 
   // A dropped token keeps its snapped spot on screen until the server agrees
   // (and stops waiting when the token is gone).
@@ -1027,22 +1038,29 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
         ? { kind: 'pen', color, width: 3, data: { points: d.points.map((p) => [r1(p[0]), r1(p[1])] as [number, number]) } }
         : { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
     if (await postShape(payload)) {
-      redoRef.current = [];
-      setRedoCount(0); // a fresh stroke starts a new undo line
+      resetHistory(false); // a fresh stroke starts a new undo line
     }
   };
 
   const undo = useCallback(() => {
+    const gen = histGen.current;
+    const boardId = boardRef.current?.id ?? null;
     histRef.current = histRef.current
       .then(async () => {
         const b = boardRef.current;
         const me = getState().me;
-        if (!b || !me) return;
-        const mine = b.drawings.filter((d) => d.author_id === me.id);
+        // The map (or the history) may have moved on since the press: an
+        // obsolete action cancels instead of touching another board.
+        if (!b || !me || b.id !== boardId || histGen.current !== gen) return;
+        const mine = b.drawings.filter((d) => d.author_id === me.id && !goneRef.current.has(d.id));
         const last = mine[mine.length - 1];
         if (!last) return;
         try {
           await api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings/${last.id}`);
+          // Marked gone now: the next press must move on even if the live
+          // event that removes it from the store hasn't arrived yet.
+          goneRef.current.add(last.id);
+          if (histGen.current !== gen) return; // reset while this ran: the redo pile stays clean
           redoRef.current.push({ kind: last.kind, color: last.color, width: last.width, data: last.data });
           setRedoCount(redoRef.current.length);
         } catch (err) {
@@ -1053,11 +1071,16 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   }, [serverId]);
 
   const redo = useCallback(() => {
+    const gen = histGen.current;
+    const boardId = boardRef.current?.id ?? null;
     histRef.current = histRef.current
       .then(async () => {
+        const b = boardRef.current;
+        if (!b || b.id !== boardId || histGen.current !== gen) return;
         const p = redoRef.current[redoRef.current.length - 1];
-        if (!p || !boardRef.current) return;
+        if (!p) return;
         if (await postShape(p)) {
+          if (histGen.current !== gen) return; // board switched mid-flight; the pile was reset
           redoRef.current.pop(); // a failed redo stays put for another try
           setRedoCount(redoRef.current.length);
         }
@@ -1086,8 +1109,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
               look="danger"
               onClick={() => {
                 close();
-                redoRef.current = [];
-                setRedoCount(0);
+                resetHistory(true);
                 api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings`).catch((err) => toast(errorMessage(err)));
               }}
             >
