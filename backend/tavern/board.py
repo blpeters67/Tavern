@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from .db import queue_event
 from .gateway import gateway
 from .models import Board, BoardDrawing, BoardToken, Character, Member, Server
+from .permissions import ServerContext
 
 log = logging.getLogger("tavern.board")
 
@@ -71,6 +72,27 @@ def tokens_payload(db: Session, tokens: list[BoardToken]) -> list[dict[str, Any]
     char_ids = {t.character_id for t in tokens if t.character_id}
     chars = {c.id: c for c in db.scalars(select(Character).where(Character.id.in_(char_ids)))} if char_ids else {}
     return [token_payload(t, chars.get(t.character_id) if t.character_id else None) for t in tokens]
+
+
+def publish_token_refresh(db: Session, ch: Character) -> None:
+    """A token wears its character: name, picture and hit points travel inside the
+    token payload, so a character or sheet edit should reach every board that has
+    one of its tokens. Re-send them (clients merge by token id)."""
+    rows = db.execute(
+        select(BoardToken, Board.server_id).join(Board, Board.id == BoardToken.board_id).where(BoardToken.character_id == ch.id)
+    ).all()
+    if not rows:
+        return
+    by_server: dict[int, list[BoardToken]] = {}
+    for tok, server_id in rows:
+        by_server.setdefault(server_id, []).append(tok)
+    for server_id, tokens in by_server.items():
+        srv = db.get(Server, server_id)
+        if srv is None:
+            continue
+        ctx = ServerContext.load(db, srv)
+        for tok in tokens:
+            queue_event(db, ctx.member_ids, "BOARD_TOKEN_UPDATE", token_payload(tok, ch))
 
 
 def drawing_payload(d: BoardDrawing) -> dict[str, Any]:

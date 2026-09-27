@@ -228,6 +228,9 @@ function Shell({
   let view;
   if (server && community) view = <CommunityPage server={server} />;
   else if (activeChannel && isVoice) view = <CallView key={activeChannel.id} channel={activeChannel} />;
+  // The game board shows this channel's chat itself; a second copy underneath
+  // would double the rendering and both would fight over read-state and scroll.
+  else if (activeChannel && boardView && activeChannel.server_id === boardView.serverId) view = null;
   else if (activeChannel) view = <ChatView key={activeChannel.id} channel={activeChannel} />;
   else if (server) view = <NoChannels name={server.name} />;
   else view = <PeoplePage />;

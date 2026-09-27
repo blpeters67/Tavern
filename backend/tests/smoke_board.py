@@ -99,6 +99,15 @@ def run(log_path: Path, data_dir: Path) -> None:
     assert a.post(f"/api/servers/{sid}/board/boards/{bid}/tokens/{tok_b['id']}/avatar", files={"file": ("x.png", png_bytes(), "image/png")}).status_code == 400  # wears its character's picture
     print("tokens ok (place, own-character rule, pictures, hit points)")
 
+    # --- character edits reach the board: rename + hit points re-send the token ----
+    ok(b.patch(f"/api/users/@me/characters/{isa['id']}", data={"name": "Isaiah the Grey"}))
+    ev = gw_a.wait_for("BOARD_TOKEN_UPDATE", lambda t: t["id"] == tok_b["id"] and t["name"] == "Isaiah the Grey")
+    assert ev["hp"] == {"current": 18, "max": 24}
+    ok(b.patch(f"/api/characters/{isa['id']}/sheet", json={"patch": {"hp": {"current": 3, "max": 24}}}))
+    ev = gw_a.wait_for("BOARD_TOKEN_UPDATE", lambda t: t["id"] == tok_b["id"] and t["hp"] and t["hp"]["current"] == 3)
+    assert ev["name"] == "Isaiah the Grey"
+    print("character edits ok (rename and hit points reach the board)")
+
     # --- moving: the owner drags their token, the DM anything, nobody else ----
     ok(b.patch(f"/api/servers/{sid}/board/boards/{bid}/tokens/{tok_b['id']}", json={"x": 130.5, "y": 210}))
     ev = gw_a.wait_for("BOARD_TOKEN_UPDATE", lambda t: t["id"] == tok_b["id"] and t["x"] == 130.5)
@@ -163,7 +172,7 @@ def run(log_path: Path, data_dir: Path) -> None:
     gw_b2 = Gateway(b)
     srv = next(s for s in gw_b2.ready["servers"] if s["id"] == sid)
     assert srv["board"]["active_id"] == bid
-    assert {t["name"] for t in srv["board"]["board"]["tokens"]} == {"Isaiah Vale", "Wolf"}
+    assert {t["name"] for t in srv["board"]["board"]["tokens"]} == {"Isaiah the Grey", "Wolf"}
     gw_b2.close()
     print("viewers + READY ok")
 

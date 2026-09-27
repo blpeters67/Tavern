@@ -317,6 +317,9 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 - routes/boards.py is the HTTP API under /api/servers/{id}/board: boards (list/create/rename/
   activate/delete), the background (upload/replace/remove; its own CDN bucket "boards", size
   cap BOARD_MAX_MB, 64 MB by default), tokens (place/move/edit/remove, avatars) and drawings.
+- A character's tokens follow it: renaming the character or editing its sheet re-publishes
+  BOARD_TOKEN_UPDATE for every token wearing that character (board.publish_token_refresh), so
+  names and hit points stay current on every open board (routes/characters.py calls it).
 - Drawings are rate-limited (240 per 10 s per user) and a board keeps the newest MAX_DRAWINGS
   (2000); pruning publishes BOARD_DRAW_DELETE so clients drop them. The ruler is local-only —
   it is never posted.
@@ -487,6 +490,16 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   native drag cancels the pointer sequence, which killed drags half-way.
 - Escape closes the board only when no modal, sheet or context menu is up (they close first),
   and it hides the ruler before it closes the board.
+- A token drop keeps its snapped spot on screen until the server position matches (no
+  rebound), and per-token PATCHes run one at a time with drag moves coalescing, so on a slow
+  link an older move can't overtake the drop.
+- A finished stroke shows at once as a pending drawing and is swapped for the saved copy by
+  id (no blink while the POST is in flight, and the live event can't double it). Redo history
+  resets when the active board changes and a failed redo keeps its entry.
+- Saved strokes and tokens are memoized (stable token props), so panning, drawing and
+  dragging don't re-render every stroke on the board.
+- While the board shows a channel's chat, AppShell does NOT mount the original ChatView
+  underneath (single instance owns scrolling and read state).
 - The tools rail: select, the DM's token/background, then pen, arrow, rectangle, oval, text
   and ruler, with a colour column and undo/redo. Saved strokes paint in an SVG under the
   tokens; the draft and the ruler paint in one over them. Undo deletes your last drawing and

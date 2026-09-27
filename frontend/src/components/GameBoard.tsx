@@ -492,25 +492,27 @@ function NewTokenModal({ serverId, board, at, onClose }: { serverId: number; boa
 const TokenView = memo(function TokenView({
   t,
   g,
-  position,
+  x,
+  y,
   dragging,
   canEdit,
   image,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onContextMenu,
+  onDown,
+  onMove,
+  onUp,
+  onMenu,
 }: {
   t: BoardToken;
   g: number;
-  position: { x: number; y: number };
+  x: number;
+  y: number;
   dragging: boolean;
   canEdit: boolean;
   image: string | null;
-  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onDown: (e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => void;
+  onMove: (e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => void;
+  onUp: (e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => void;
+  onMenu: (e: React.MouseEvent<HTMLDivElement>, t: BoardToken) => void;
 }) {
   const d = t.size * g;
   const hpPct = t.hp && t.hp.max > 0 ? Math.max(0, Math.min(1, t.hp.current / t.hp.max)) : null;
@@ -518,13 +520,13 @@ const TokenView = memo(function TokenView({
   return (
     <div
       className={`board-token ${t.disposition} ${dragging ? 'dragging' : ''} ${canEdit ? 'editable' : ''}`}
-      style={{ width: d, height: d, transform: `translate(${position.x - d / 2}px, ${position.y - d / 2}px)` }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      style={{ width: d, height: d, transform: `translate(${x - d / 2}px, ${y - d / 2}px)` }}
+      onPointerDown={(e) => onDown(e, t)}
+      onPointerMove={(e) => onMove(e, t)}
+      onPointerUp={(e) => onUp(e, t)}
+      onPointerCancel={(e) => onUp(e, t)}
       onDragStart={(e) => e.preventDefault()}
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => onMenu(e, t)}
       role="img"
       aria-label={`${t.name} (${dispositionLabel[t.disposition]})`}
       title={t.hp ? `${t.name} — ${t.hp.current}/${t.hp.max}` : t.name}
@@ -568,7 +570,7 @@ function draftShape(d: Draft, color: string): Shape {
   return { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
 }
 
-function DrawingShape({ d, ghost }: { d: Shape; ghost?: boolean }) {
+const DrawingShape = memo(function DrawingShape({ d, ghost }: { d: Shape; ghost?: boolean }) {
   const common = { stroke: d.color, strokeWidth: d.width, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   if (d.kind === 'pen') {
     const data = d.data as { points: [number, number][] };
@@ -607,7 +609,7 @@ function DrawingShape({ d, ghost }: { d: Shape; ghost?: boolean }) {
       <polygon points={`${tx},${ty} ${bx + nx * spread},${by + ny * spread} ${bx - nx * spread},${by - ny * spread}`} fill={d.color} />
     </g>
   );
-}
+});
 
 /** The ruler: a dashed line with the distance on it. Local to whoever drags it. */
 function RulerMark({ a, b, g }: { a: Pt; b: Pt; g: number }) {
@@ -853,13 +855,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const characters = useStore((s) => s.characters);
   const stageRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ x: 0, y: 0, z: 1 });
+  const boardRef = useRef<Board | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, z: 1 });
   const [gridOn, setGridOn] = useState(true);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const dragRef = useRef<{ id: number; dx: number; dy: number; sx: number; sy: number; px: number; py: number; moved: boolean; last: number } | null>(null);
-  const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number; hold?: boolean } | null>(null);
   const [tool, setTool] = useState<'select' | DrawKind | 'text' | 'ruler'>('select');
   const [color, setColor] = useState(DRAW_COLORS[0]);
   const drawRef = useRef<Draft | null>(null);
@@ -868,7 +871,13 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const [ruler, setRuler] = useState<{ a: Pt; b: Pt } | null>(null);
   const redoRef = useRef<Shape[]>([]);
   const [redoCount, setRedoCount] = useState(0);
+  // A finished stroke shows right away; the server copy replaces it by id.
+  const [pending, setPending] = useState<Map<string, Shape>>(new Map());
+  const [localDraws, setLocalDraws] = useState<Map<number, Shape>>(new Map());
+  const shapeSeq = useRef(0);
+  const patchQueues = useRef<Map<number, { running: boolean; queue: { body: Record<string, unknown>; done?: (ok: boolean) => void }[] }>>(new Map());
   const board = sb?.board ?? null;
+  boardRef.current = board;
   const meId = useStore((s) => s.me?.id ?? null);
   const myDrawings = useMemo(() => (board ? board.drawings.filter((d) => d.author_id === meId) : []), [board, meId]);
   const world = worldSize(board);
@@ -928,6 +937,35 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Redo belongs to one board: switching maps starts a clean history.
+  useEffect(() => {
+    redoRef.current = [];
+    setRedoCount(0);
+  }, [board?.id]);
+
+  // A dropped token keeps its snapped spot on screen until the server agrees
+  // (and stops waiting when the token is gone).
+  useEffect(() => {
+    const dp = dragPos;
+    if (!dp || !dp.hold) return;
+    const t = board?.tokens.find((x) => x.id === dp.id);
+    if (!t || (Math.abs(t.x - dp.x) < 0.2 && Math.abs(t.y - dp.y) < 0.2)) setDragPos(null);
+  }, [board, dragPos]);
+
+  // Once the live event brings a saved drawing, its local stand-in goes.
+  useEffect(() => {
+    if (!board || localDraws.size === 0) return;
+    const have = new Set(board.drawings.map((x) => x.id));
+    let gone = false;
+    for (const id of localDraws.keys()) if (have.has(id)) gone = true;
+    if (!gone) return;
+    setLocalDraws((m) => {
+      const next = new Map(m);
+      for (const id of next.keys()) if (have.has(id)) next.delete(id);
+      return next;
+    });
+  }, [board, localDraws]);
+
   const toWorld = useCallback((cx: number, cy: number) => {
     const el = stageRef.current;
     const v = viewRef.current;
@@ -945,20 +983,43 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     return snapPoint(board, (rect.width / 2 - v.x) / v.z, (rect.height / 2 - v.y) / v.z);
   }, [board, world.w, world.h]);
 
+  /** A finished stroke shows instantly; once the server answers it is kept by id
+   *  until the live event lands, so it never blinks out or doubles up. */
+  const postShape = useCallback(async (shape: Shape): Promise<boolean> => {
+    const b = boardRef.current;
+    if (!b) return false;
+    const key = 'p' + ++shapeSeq.current;
+    setPending((m) => new Map(m).set(key, shape));
+    try {
+      const saved = await api.post<BoardDrawing>(`/api/servers/${serverId}/board/boards/${b.id}/drawings`, shape);
+      setPending((m) => {
+        const next = new Map(m);
+        next.delete(key);
+        return next;
+      });
+      setLocalDraws((m) => new Map(m).set(saved.id, { kind: saved.kind, color: saved.color, width: saved.width, data: saved.data }));
+      return true;
+    } catch (err) {
+      setPending((m) => {
+        const next = new Map(m);
+        next.delete(key);
+        return next;
+      });
+      toast(errorMessage(err));
+      return false;
+    }
+  }, [serverId]);
+
   const saveDrawing = async (d: Draft) => {
-    if (!board) return;
     const tooSmall = d.kind === 'pen' ? d.points.length < 2 : Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < 2;
     if (tooSmall) return;
     const payload: Shape =
       d.kind === 'pen'
         ? { kind: 'pen', color, width: 3, data: { points: d.points.map((p) => [r1(p[0]), r1(p[1])] as [number, number]) } }
         : { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
-    try {
-      await api.post(`/api/servers/${serverId}/board/boards/${board.id}/drawings`, payload);
+    if (await postShape(payload)) {
       redoRef.current = [];
       setRedoCount(0); // a fresh stroke starts a new undo line
-    } catch (err) {
-      toast(errorMessage(err));
     }
   };
 
@@ -979,16 +1040,13 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   }, [board, serverId]);
 
   const redo = useCallback(async () => {
-    const b = board;
-    const p = redoRef.current.pop();
-    if (!b || !p) return;
-    setRedoCount(redoRef.current.length);
-    try {
-      await api.post(`/api/servers/${serverId}/board/boards/${b.id}/drawings`, p);
-    } catch (err) {
-      toast(errorMessage(err));
+    const p = redoRef.current[redoRef.current.length - 1];
+    if (!p || !boardRef.current) return;
+    if (await postShape(p)) {
+      redoRef.current.pop(); // a failed redo stays put for another try
+      setRedoCount(redoRef.current.length);
     }
-  }, [board, serverId]);
+  }, [postShape]);
 
   const pickTool = (t: 'select' | DrawKind | 'text' | 'ruler') => {
     setTool(t);
@@ -1087,25 +1145,45 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     void saveDrawing(d);
   };
 
-  const patchToken = async (tokenId: number, body: Record<string, unknown>) => {
-    if (!board) return;
-    try {
-      await api.patch(`/api/servers/${serverId}/board/boards/${board.id}/tokens/${tokenId}`, body);
-    } catch (err) {
-      toast(errorMessage(err));
-    }
-  };
+  /** Token changes go out one at a time, in order. While a request is in flight
+   *  another one only queues; a throttled drag move may replace a queued move
+   *  (coalesce), but the released position is never dropped, so on a slow link
+   *  the drop still wins instead of an older move overtaking it. */
+  const queuePatch = useCallback((tokenId: number, body: Record<string, unknown>, opts?: { coalesce?: boolean; onDone?: (ok: boolean) => void }) => {
+    const b = boardRef.current;
+    if (!b) return;
+    const q = patchQueues.current.get(tokenId) ?? { running: false, queue: [] };
+    patchQueues.current.set(tokenId, q);
+    if (opts?.coalesce && (q.running || q.queue.length > 0)) return;
+    q.queue.push({ body, done: opts?.onDone });
+    if (q.running) return;
+    q.running = true;
+    const url = `/api/servers/${serverId}/board/boards/${b.id}/tokens/${tokenId}`;
+    void (async () => {
+      while (q.queue.length > 0) {
+        const item = q.queue.shift()!;
+        try {
+          await api.patch(url, item.body);
+          item.done?.(true);
+        } catch (err) {
+          toast(errorMessage(err));
+          item.done?.(false);
+        }
+      }
+      q.running = false;
+    })();
+  }, [serverId]);
 
-  const canMoveToken = (t: BoardToken): boolean => {
+  const canMoveToken = useCallback((t: BoardToken): boolean => {
     const s = getState();
     if (canControlBoard(s, serverId)) return true;
     const me = s.me;
     if (!me || t.character_id === null) return false;
     const ch = s.characters[t.character_id];
     return !!ch && ch.owner_id === me.id;
-  };
+  }, [serverId]);
 
-  const tokenPointerDown = (t: BoardToken) => (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onTokenDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => {
     if (e.button !== 0) return;
     if (!canMoveToken(t)) return; // let the board pan from over a token you can't move
     e.stopPropagation();
@@ -1113,9 +1191,9 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     const w = toWorld(e.clientX, e.clientY);
     dragRef.current = { id: t.id, dx: t.x - w.x, dy: t.y - w.y, sx: w.x, sy: w.y, px: t.x, py: t.y, moved: false, last: 0 };
     setDragPos({ id: t.id, x: t.x, y: t.y });
-  };
+  }, [canMoveToken, toWorld]);
 
-  const tokenPointerMove = (t: BoardToken) => (e: ReactPointerEvent<HTMLDivElement>) => {
+  const onTokenMove = useCallback((e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => {
     const d = dragRef.current;
     if (!d || d.id !== t.id) return;
     const w = toWorld(e.clientX, e.clientY);
@@ -1128,32 +1206,37 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     const now = performance.now();
     if (d.moved && now - d.last > 140) {
       d.last = now;
-      void patchToken(t.id, { x: r1(x), y: r1(y) });
+      queuePatch(t.id, { x: r1(x), y: r1(y) }, { coalesce: true });
     }
-  };
+  }, [queuePatch, toWorld]);
 
-  const tokenPointerUp = (t: BoardToken) => () => {
+  const onTokenUp = useCallback((_e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => {
     const d = dragRef.current;
     dragRef.current = null;
-    setDragPos(null);
-    if (!d || d.id !== t.id) return;
+    if (!d || d.id !== t.id) {
+      setDragPos(null);
+      return;
+    }
     if (!d.moved) {
+      setDragPos(null);
       // A click, not a drag: a character's sheet opens.
       if (t.character_id !== null) openSheet(t.character_id, serverId);
       return;
     }
-    const s = snapPoint(board, d.px, d.py);
-    void patchToken(t.id, { x: s.x, y: s.y });
-  };
+    const s = snapPoint(boardRef.current, d.px, d.py);
+    setDragPos({ id: t.id, x: s.x, y: s.y, hold: true });
+    queuePatch(t.id, { x: s.x, y: s.y }, { onDone: (ok) => { if (!ok) setDragPos((p) => (p && p.hold && p.id === t.id ? null : p)); } });
+    window.setTimeout(() => setDragPos((p) => (p && p.hold && p.id === t.id ? null : p)), 4000);
+  }, [queuePatch, serverId]);
 
-  const tokenContextMenu = (t: BoardToken) => (e: React.MouseEvent<HTMLDivElement>) => {
+  const onTokenMenu = useCallback((e: React.MouseEvent<HTMLDivElement>, t: BoardToken) => {
     const s = getState();
     const control = canControlBoard(s, serverId);
     const me = s.me;
     const own = t.character_id !== null && !!me && s.characters[t.character_id]?.owner_id === me.id;
     if (!control && !own) return;
     e.preventDefault();
-    const b = board;
+    const b = boardRef.current;
     if (!b) return;
     openContextMenu(e, (close) => (
       <>
@@ -1164,7 +1247,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
             checked={t.disposition === d}
             onClick={() => {
               close();
-              void patchToken(t.id, { disposition: d });
+              queuePatch(t.id, { disposition: d });
             }}
           />
         ))}
@@ -1188,7 +1271,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
         />
       </>
     ));
-  };
+  }, [serverId, queuePatch]);
 
   const onPickFile = (files: FileList | null) => {
     const f = files?.[0];
@@ -1295,6 +1378,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 {board.drawings.map((d) => (
                   <DrawingShape key={d.id} d={d} />
                 ))}
+                {[...pending.entries()].map(([k, s]) => (
+                  <DrawingShape key={k} d={s} />
+                ))}
+                {[...localDraws.entries()]
+                  .filter(([id]) => !board.drawings.some((d) => d.id === id))
+                  .map(([id, s]) => (
+                    <DrawingShape key={`l${id}`} d={s} />
+                  ))}
               </svg>
               {board.tokens.map((t) => {
                 const pos = dragPos && dragPos.id === t.id ? dragPos : { x: t.x, y: t.y };
@@ -1303,14 +1394,15 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                     key={t.id}
                     t={t}
                     g={board.grid_size}
-                    position={pos}
-                    dragging={!!dragPos && dragPos.id === t.id}
+                    x={pos.x}
+                    y={pos.y}
+                    dragging={!!dragPos && dragPos.id === t.id && !dragPos.hold}
                     canEdit={canMoveToken(t)}
                     image={tokenImage(t, characters)}
-                    onPointerDown={tokenPointerDown(t)}
-                    onPointerMove={tokenPointerMove(t)}
-                    onPointerUp={tokenPointerUp(t)}
-                    onContextMenu={tokenContextMenu(t)}
+                    onDown={onTokenDown}
+                    onMove={onTokenMove}
+                    onUp={onTokenUp}
+                    onMenu={onTokenMenu}
                   />
                 );
               })}

@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import sheets
+from ..board import publish_token_refresh
 from ..db import get_db, queue_event
 from ..deps import ApiError, current_user, field_errors, forbidden, not_found, rate_limit
 from ..files import delete_files, save_image
@@ -168,6 +169,7 @@ def update_character(
         old_avatar = ch.avatar
         ch.avatar = None
     publish_character(db, ch, "CHARACTER_UPDATE")
+    publish_token_refresh(db, ch)
     db.commit()
     if old_avatar and old_avatar != ch.avatar:
         # Old messages point at the character, not the file, so this is safe.
@@ -286,5 +288,6 @@ def patch_sheet(character_id: int, body: SheetPatch, user: User = Depends(curren
         {"character_id": ch.id, "patch": change, "rev": new["rev"], "updated_by": user.id},
     )
     publish_character(db, ch, "CHARACTER_UPDATE")
+    publish_token_refresh(db, ch)
     db.commit()
     return {"character_id": ch.id, "sheet": new, "can_edit": True}
