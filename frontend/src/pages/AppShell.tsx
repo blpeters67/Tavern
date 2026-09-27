@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import CallView from '../components/CallView';
@@ -6,7 +6,7 @@ import ChannelSidebar from '../components/ChannelSidebar';
 import ChatView from '../components/ChatView';
 import CommunityPage from '../components/CommunityPage';
 import HomeSidebar from '../components/HomeSidebar';
-import { TavernLogo } from '../components/icons';
+import { Icon, mdiChevronRight, TavernLogo } from '../components/icons';
 import { JukeboxWindowHost } from '../components/Jukebox';
 import { BoardRoom } from '../components/GameBoard';
 import { TheaterScreenHost } from '../components/Theater';
@@ -19,6 +19,7 @@ import '../lib/jukebox';
 import '../lib/theater';
 import { unlockAudioOnGesture } from '../lib/sounds';
 import '../lib/voice';
+import { load, save } from '../lib/storage';
 import { channelOpened, go, rememberChannel } from '../store/actions';
 import { canView, channelTitle, firstChannel } from '../store/selectors';
 import { getState, setState, useStore, type State } from '../store/store';
@@ -126,6 +127,77 @@ function fallbackChannel(s: State, serverId: number): number | null {
   return firstChannel(s, serverId)?.id ?? null;
 }
 
+/**
+ * The board's draggable column edges: pull the channel list in to hide it (a
+ * tab brings it back), or resize the chat column. The width goes straight to
+ * the DOM while dragging so the chat and board don't re-render per move; the
+ * store (and localStorage) only change on release.
+ */
+function ColumnHandle({
+  side,
+  collapsed,
+  onCommit,
+  onReset,
+  onExpand,
+}: {
+  side: 'left' | 'right';
+  collapsed?: boolean;
+  onCommit: (w: number) => void;
+  onReset: () => void;
+  onExpand?: () => void;
+}) {
+  const drag = useRef<{ startX: number; startW: number; last: number; moved: boolean } | null>(null);
+  const target = () =>
+    side === 'left'
+      ? document.querySelector<HTMLElement>('.app-nav .sidebar')
+      : document.querySelector<HTMLElement>('.app > .right-panel');
+  const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const el = target();
+    drag.current = { startX: e.clientX, startW: el?.getBoundingClientRect().width ?? (side === 'left' ? 240 : 380), last: -1, moved: false };
+    document.body.classList.add('col-resizing');
+  };
+  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const delta = e.clientX - d.startX;
+    let w = Math.round(side === 'left' ? d.startW + delta : d.startW - delta);
+    w = Math.max(0, Math.min(side === 'left' ? 460 : 640, w));
+    if (side === 'left' && w < 110) w = 0;
+    else if (side === 'right') w = Math.max(240, w);
+    d.last = w;
+    d.moved = true;
+    const el = target();
+    if (el) el.style.width = `${w}px`;
+  };
+  const onUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    document.body.classList.remove('col-resizing');
+    if (d?.moved && d.last >= 0) onCommit(d.last);
+  };
+  return (
+    <div
+      className={`app-split ${collapsed ? 'collapsed' : ''}`}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={side === 'left' ? 'Resize or hide the channel list' : 'Resize the chat column'}
+      onPointerDown={onDown}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
+      onDoubleClick={onReset}
+    >
+      {collapsed && (
+        <button className="app-split-tab" aria-label="Show the channel list" onPointerDown={(e) => e.stopPropagation()} onClick={onExpand}>
+          <Icon path={mdiChevronRight} size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Shell({
   serverId,
   channelId,
@@ -147,6 +219,12 @@ function Shell({
   const sheetOpen = useStore((s) => !!s.sheetView);
   const theaterWindowOpen = useStore((s) => !!s.theaterView);
   const boardView = useStore((s) => s.boardView);
+  const lastChannels = useStore((s) => s.lastChannelByServer);
+  // The chat the board falls back to when a voice space is open: the last text
+  // channel you visited (never re-renders per message — see viewChannel).
+  const boardServerId = boardView && server && server.id === boardView.serverId && !community ? server.id : null;
+  const boardFallbackId = boardServerId !== null ? lastChannels[boardServerId] : undefined;
+  const boardFallback = useStore(useShallow((s) => viewChannel(boardFallbackId != null ? s.channels[boardFallbackId] : undefined)));
 
   const viewable = useStore((s) => (channel ? canView(s, channel) : false));
   const needsFallback = serverId !== null && !!server && !community && (!channel || channel.server_id !== server.id || !isServerView(channel.type) || !viewable);
@@ -199,6 +277,26 @@ function Shell({
       : undefined;
   const isVoice = activeChannel?.type === ChannelType.VOICE;
 
+  // On the board the app stays whole: the channel list keeps its place on the
+  // left, the map takes the middle, and the right column trades the member list
+  // for this channel's chat. Column widths are remembered between visits.
+  const boardMode = boardServerId !== null;
+  const boardChannel = (() => {
+    if (!boardMode) return undefined;
+    if (activeChannel && activeChannel.server_id === boardServerId && activeChannel.type !== ChannelType.VOICE) return activeChannel;
+    return boardFallback && boardFallback.server_id === boardServerId && boardFallback.type === ChannelType.TEXT ? boardFallback : undefined;
+  })();
+  const [leftW, setLeftW] = useState<number | null>(() => load<number | null>('boardLeftW', null));
+  const [rightW, setRightW] = useState<number | null>(() => load<number | null>('boardRightW', null));
+  const saveLeft = (w: number | null) => {
+    setLeftW(w);
+    save('boardLeftW', w);
+  };
+  const saveRight = (w: number | null) => {
+    setRightW(w);
+    save('boardRightW', w);
+  };
+
   useEffect(() => {
     // Voice spaces have no messages, so they never count as the "open" text channel.
     const open = activeChannel && !isVoice ? activeChannel.id : null;
@@ -227,19 +325,22 @@ function Shell({
   const showPanel = !!server || activeChannel?.type === ChannelType.GROUP_DM;
   let view;
   if (server && community) view = <CommunityPage server={server} />;
+  // The board keeps the whole app around it, so it simply takes the middle.
+  else if (boardMode && server) view = <BoardRoom serverId={server.id} channel={boardChannel} />;
   else if (activeChannel && isVoice) view = <CallView key={activeChannel.id} channel={activeChannel} />;
-  // The game board shows this channel's chat itself; a second copy underneath
-  // would double the rendering and both would fight over read-state and scroll.
-  else if (activeChannel && boardView && activeChannel.server_id === boardView.serverId) view = null;
   else if (activeChannel) view = <ChatView key={activeChannel.id} channel={activeChannel} />;
   else if (server) view = <NoChannels name={server.name} />;
   else view = <PeoplePage />;
 
   return (
-    <div className={`app ${navOpen ? 'nav-open' : ''} ${membersOpen ? 'members-open' : ''}`}>
+    <div className={`app ${navOpen ? 'nav-open' : ''} ${membersOpen ? 'members-open' : ''} ${boardMode ? 'board-mode' : ''}`}>
       <div className="app-nav">
         <ServerRail activeServerId={serverId} />
-        <nav className="sidebar" aria-label={server ? `${server.name} channels` : 'Direct messages'}>
+        <nav
+          className="sidebar"
+          aria-label={server ? `${server.name} channels` : 'Direct messages'}
+          style={boardMode && leftW != null ? { width: leftW } : undefined}
+        >
           {server ? (
             <ChannelSidebar server={server} activeChannelId={activeChannel?.id ?? null} communityActive={community} />
           ) : (
@@ -248,8 +349,18 @@ function Shell({
           <UserPanel />
         </nav>
       </div>
+      {boardMode && <ColumnHandle side="left" collapsed={leftW === 0} onCommit={saveLeft} onReset={() => saveLeft(null)} onExpand={() => saveLeft(240)} />}
       <main className="main">{view}</main>
-      {showPanel && <RightPanel channel={activeChannel} serverId={server?.id ?? null} open={panelOpen} />}
+      {boardMode && <ColumnHandle side="right" onCommit={saveRight} onReset={() => saveRight(null)} />}
+      {showPanel && (
+        <RightPanel
+          channel={boardMode ? boardChannel : activeChannel}
+          serverId={server?.id ?? null}
+          open={boardMode ? true : panelOpen}
+          board={boardMode}
+          width={boardMode ? rightW : null}
+        />
+      )}
       <div className="mobile-scrim" onClick={() => setState({ mobileNavOpen: false, mobileMembersOpen: false })} />
       {sheetOpen && (
         <Suspense fallback={null}>
@@ -263,12 +374,6 @@ function Shell({
         </Suspense>
       )}
       <TheaterScreenHost />
-      {boardView && (
-        <BoardRoom
-          serverId={boardView.serverId}
-          channel={activeChannel && activeChannel.server_id === boardView.serverId && activeChannel.type !== ChannelType.VOICE ? activeChannel : undefined}
-        />
-      )}
       <ProfilePopoutHost />
       {settings && (
         <Suspense fallback={null}>

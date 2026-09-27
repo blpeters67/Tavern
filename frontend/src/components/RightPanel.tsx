@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react';
 import { characterAvatar, userAvatar } from '../lib/avatars';
+import ChatView from './ChatView';
 import { channelPermissions, P } from '../lib/permissions';
 import { openContextMenu } from '../store/actions';
 import { displayName, narratorName, permCtx, roleColor, userIsDm } from '../store/selectors';
@@ -202,9 +203,23 @@ function MemberGroups({ channel, serverId }: { channel: Channel | undefined; ser
 
 /**
  * The right-hand column: in servers, the DM Lock switch, the jukebox and the
- * theater on top of the member list; in group DMs, just the members.
+ * theater on top of the member list; in group DMs, just the members. On the
+ * board, the chat takes the member list's place so the map, the channels and
+ * the conversation all stay in view.
  */
-export default function RightPanel({ channel, serverId, open }: { channel: Channel | undefined; serverId: number | null; open: boolean }) {
+export default function RightPanel({
+  channel,
+  serverId,
+  open,
+  board,
+  width,
+}: {
+  channel: Channel | undefined;
+  serverId: number | null;
+  open: boolean;
+  board?: boolean;
+  width?: number | null;
+}) {
   const hasJukebox = useStore((s) => serverId !== null && !!s.jukebox[serverId]);
   const hasTheater = useStore((s) => serverId !== null && !!s.theater[serverId]);
   const hasBoard = useStore((s) => serverId !== null && !!s.board[serverId]);
@@ -212,20 +227,34 @@ export default function RightPanel({ channel, serverId, open }: { channel: Chann
   const search =
     panel.kind === 'search' && panel.serverId === serverId && (serverId !== null || panel.channelId === channel?.id) ? panel : null;
   return (
-    <aside className={`right-panel scroller-thin ${open ? '' : 'collapsed'} ${search ? 'searching' : ''}`} aria-label={search ? 'Search results' : 'Members'}>
+    <aside
+      className={`right-panel scroller-thin ${open ? '' : 'collapsed'} ${search ? 'searching' : ''} ${board ? 'board' : ''}`}
+      style={board && width ? { width } : undefined}
+      aria-label={search ? 'Search results' : board ? 'Chat' : 'Members'}
+    >
       {search ? (
         <SearchResults key={search.query} query={search.query} serverId={search.serverId} channelId={search.channelId} />
       ) : (
         <>
           {serverId !== null && (
-            <div className="right-panel-top">
+            <div className="right-panel-top scroller-thin">
               <RoleplayToggle serverId={serverId} />
               {hasJukebox && <JukeboxCard serverId={serverId} />}
               {hasTheater && <TheaterCard serverId={serverId} />}
               {hasBoard && <BoardCard serverId={serverId} />}
             </div>
           )}
-          <MemberGroups channel={channel} serverId={serverId} />
+          {board ? (
+            channel && channel.type !== ChannelType.VOICE ? (
+              <div className="board-chat-inner">
+                <ChatView key={channel.id} channel={channel} board />
+              </div>
+            ) : (
+              <div className="board-chat-empty">Pick a text channel to chat here.</div>
+            )
+          ) : (
+            <MemberGroups channel={channel} serverId={serverId} />
+          )}
         </>
       )}
     </aside>

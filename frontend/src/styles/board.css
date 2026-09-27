@@ -1,13 +1,13 @@
 /* The game board: the shared battle map, its rail card, and the chat beside it.
    (Palette tokens come from base.css.) */
 
-/* The whole room covers the app; the theater/jukebox windows and modals still
-   open above it. */
+/* The board is a main view now: the channel list stays on the left and the
+   right column holds the cards plus the chat. */
 
 .board-room {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   background: var(--bg-tertiary);
 }
@@ -423,22 +423,24 @@
   white-space: nowrap;
 }
 
-/* ---------- The chat column ---------- */
+/* ---------- The chat, in the right column while the board is open ---------- */
 
-.board-chat {
-  flex-shrink: 0;
+.right-panel.board {
   display: flex;
   flex-direction: column;
-  width: 380px;
-  min-height: 0;
-  background: var(--bg-primary);
-  border-left: 1px solid var(--divider);
+  overflow: hidden;
+}
+
+.right-panel.board .right-panel-top {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
 }
 
 .board-chat-inner {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
 }
 
@@ -452,6 +454,58 @@
   padding: 20px;
   color: var(--text-muted);
   text-align: center;
+}
+
+/* ---------- Resizable board columns ---------- */
+
+body.col-resizing,
+body.col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.app-split {
+  flex: 0 0 6px;
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.app-split:hover {
+  background: var(--bg-mod-hover);
+}
+
+.app-split.collapsed {
+  flex-basis: 18px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--divider);
+}
+
+.app-split-tab {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--divider);
+  border-left: none;
+  border-radius: 0 7px 7px 0;
+  background: var(--bg-secondary);
+  color: var(--interactive-normal);
+  cursor: pointer;
+}
+
+.app-split-tab:hover {
+  color: var(--interactive-hover);
+  background: var(--bg-mod-hover);
 }
 
 /* ---------- Nothing yet ---------- */
@@ -730,7 +784,13 @@
 }
 
 @media (max-width: 900px) {
-  .board-chat {
+  /* Phones: the columns get their normal drawer treatment, so the board's
+     drag edges and the chat column step aside. */
+  .app.board-mode .right-panel {
+    display: none;
+  }
+
+  .app.board-mode .app-split {
     display: none;
   }
 

@@ -106,7 +106,7 @@ export function PanelToggle() {
   );
 }
 
-function ChatHeader({ channel }: { channel: Channel }) {
+function ChatHeader({ channel, board }: { channel: Channel; board?: boolean }) {
   const partner = useStore((s) => dmPartner(s, channel));
   const title = useStore((s) => channelTitle(s, channel));
   const pins = usePopout();
@@ -156,7 +156,9 @@ function ChatHeader({ channel }: { channel: Channel }) {
         >
           <Icon path={mdiPin} size={24} />
         </button>
-        {hasMembers && <PanelToggle />}
+        {/* In the board the chat lives in the right column itself, so the
+            members-list toggle has nothing to toggle. */}
+        {hasMembers && !board && <PanelToggle />}
         <SearchBox channel={channel} />
       </div>
       {pins.anchor && <PinsPopout channel={channel} anchor={pins.anchor} onClose={pins.close} />}
@@ -164,7 +166,7 @@ function ChatHeader({ channel }: { channel: Channel }) {
   );
 }
 
-export default function ChatView({ channel }: { channel: Channel }) {
+export default function ChatView({ channel, board }: { channel: Channel; board?: boolean }) {
   const connected = useStore((s) => s.connected);
   const canAttach = useStore((s) => (myChannelPerms(s, s.channels[channel.id]) & (P.ATTACH_FILES | P.SEND_MESSAGES)) === (P.ATTACH_FILES | P.SEND_MESSAGES));
   const [dragging, setDragging] = useState(false);
@@ -197,7 +199,7 @@ export default function ChatView({ channel }: { channel: Channel }) {
       onDragOver={(e) => hasFiles(e) && canAttach && e.preventDefault()}
       onDrop={onDrop}
     >
-      <ChatHeader channel={channel} />
+      <ChatHeader channel={channel} board={board} />
       <div className="chat-content">
         <div className="chat-main">
           {!connected && <div className="connection-bar">Reconnecting…</div>}

@@ -110,6 +110,7 @@ Songs and albums work straight away. Spotify only lets apps read a playlist's so
 
 The card under the theater. It's a shared battle map: everyone looks at the same board at the same moment, like the theater but for the table.
 
+- **One screen, three columns:** the board fits into the app instead of covering it. Your channel list keeps its usual place on the left — drag its edge to widen it, or pull it in and it tucks away behind a tab — the map takes the middle, and the right column keeps the jukebox and theater cards with the channel's chat underneath them in place of the member list. The chat there is the real channel: the same messages, the same dice, follow it to another channel from the list.
 - **Boards** are saved per server — one for the goblin ambush, one for the sunken temple. Whoever runs the game switches between them from the board's title menu, and everyone follows along.
 - **Background:** upload a picture (PNG or JPG, 64 MB by default) and it becomes the map. The grid sits on top, with a square size you pick.
 - **Tokens:** the Dungeon Master places monsters, NPCs and markers from **Place Token** (name, ring colour, optional hit points) and can drop any character onto the board. Players get a button that puts their own character on too.

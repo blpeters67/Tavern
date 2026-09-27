@@ -14,7 +14,7 @@ import { canControlBoard, displayName, myCharacters } from '../store/selectors';
 import { getState, useStore } from '../store/store';
 import { claimRollAnimation, roll as requestRoll } from '../lib/rolls';
 import type { Board, BoardDrawing, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
-import { ChannelType, MessageType } from '../store/types';
+import { MessageType } from '../store/types';
 import {
   Icon,
   mdiAccountPlus,
@@ -50,7 +50,6 @@ import { CardEye } from './Jukebox';
 import { MenuItem, Modal, tip } from './layers';
 import { toast } from './Toasts';
 import { Avatar, Button, Field, TextInput } from './ui';
-import ChatView from './ChatView';
 import { BoardDiceOverlay, type BoardRoll } from './BoardDice';
 
 const DEFAULT_W = 1600;
@@ -1438,9 +1437,6 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
             </Button>
           )}
         </div>
-        <aside className="board-chat">
-          {channel && channel.type !== ChannelType.VOICE ? <ChatColumn channel={channel} /> : <div className="board-chat-empty">Pick a text channel to chat here.</div>}
-        </aside>
       </div>
     );
   }
@@ -1632,18 +1628,6 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => onPickFile(e.target.files)} />
         </div>
       </div>
-      <aside className="board-chat">
-        {channel && channel.type !== ChannelType.VOICE ? <ChatColumn channel={channel} /> : <div className="board-chat-empty">Pick a text channel to chat here.</div>}
-      </aside>
-    </div>
-  );
-}
-
-/** The chat beside the board is the real channel: the same messages, the same dice. */
-function ChatColumn({ channel }: { channel: Channel }) {
-  return (
-    <div className="board-chat-inner">
-      <ChatView key={channel.id} channel={channel} />
     </div>
   );
 }

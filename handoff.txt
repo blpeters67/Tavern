@@ -484,6 +484,19 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   live mini preview and who has it open), BoardRoom (the board in the middle with the
   channel's real ChatView beside it), the DM's token palette and the small modals;
   styles/board.css styles it; the BOARD_* handlers live in store.ts.
+- The board is a main VIEW, not an overlay: AppShell renders BoardRoom whenever the open
+  board's server is the current one (boardView.serverId === server.id, community page wins),
+  so the left channel list and the right column stay in place. The middle's chat is gone
+  from the board: RightPanel gets board={true} and swaps its member list for the channel's
+  ChatView (ChatView also takes board to drop its member-list toggle, which has nothing to
+  toggle there). The chat's channel is the active text channel, falling back to
+  lastChannelByServer so joining voice keeps the messages beside the map. Two ColumnHandle
+  separators (AppShell) drag the side columns: widths go to the DOM while dragging and land
+  in localStorage (boardLeftW / boardRightW) on release; pulling the channel list in below
+  ~110 px tucks it away to width 0 with a tab to bring it back, double-click resets. The
+  right column's cards scrollbox is capped at 45% height in board mode so the chat below it
+  keeps its space. Both handles and the board's right column hide under 900 px like the old
+  board chat did.
 - The board is one transformed div (translate + scale); panning and wheel-zoom only change
   it. Dragging a token uses pointer capture, patches the position at most every 140 ms and
   snaps to the square middle on drop. dragstart is prevented on tokens and the stage: a
