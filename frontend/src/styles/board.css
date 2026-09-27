@@ -17,6 +17,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  container-type: inline-size;
 }
 
 /* ---------- Top bar ---------- */
@@ -86,6 +87,16 @@
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.board-title-plain span {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .board-menu {
@@ -1017,4 +1028,49 @@ body.col-resizing * {
 .board-dice-quiet {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* ---------- The top bar when its column is narrow ---------- */
+
+/* The side panels can squeeze this column right down: shed the least-needed
+   controls first, then let the bar wrap onto a second row instead of spilling
+   over its edges into the columns beside it. */
+
+@container (max-width: 1080px) {
+  .board-zoom-slider {
+    display: none;
+  }
+}
+
+@container (max-width: 980px) {
+  .board-viewers {
+    display: none;
+  }
+}
+
+@container (max-width: 780px) {
+  .board-title-button span,
+  .board-title-plain span {
+    display: none;
+  }
+
+  .board-zoom-pct {
+    display: none;
+  }
+}
+
+@container (max-width: 740px) {
+  .board-top {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 48px;
+    padding: 6px 10px;
+    row-gap: 2px;
+  }
+
+  .board-top-tools {
+    order: 10;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
 }

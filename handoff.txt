@@ -498,6 +498,23 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   right column's cards scrollbox is capped at 45% height in board mode so the chat below it
   keeps its space. Both handles and the board's right column hide under 900 px like the old
   board chat did.
+- The right column is a flex column (overflow hidden, it no longer scrolls as a whole): a
+  pinned .right-panel-head holds the DM Lock switch (it hides itself via :empty when
+  RoleplayToggle renders nothing), the cards sit in .right-panel-top (own scroller, natural
+  height capped at 45% on the board / 55% elsewhere, or an exact share from the
+  rightCardsSplit fraction), then the .right-cards-split handle — the channel list's oval-grip
+  splitter, horizontal — then .right-panel-rest (the member list scroller; in the board the
+  chat takes its place). Dragging the handle sets the share live on the DOM and commits on
+  release; under ~48 px it snaps to 0 (cards fully hidden, grip stays right under the DM
+  Lock), double-click resets to the natural height. The search results scroll themselves
+  (.right-panel .search-results).
+- The board top bar adapts to its column with container queries (.board-shell is the
+  container): the zoom slider drops at <=1080 px, viewer avatars at <=980, the title text and
+  zoom % at <=780, and at <=740 the bar wraps onto two rows with the tool strip ordered last
+  on its own full-width row (the tools wrap again if needed — never make the strip or the bar
+  an overflow container: the dice tray hangs off the strip absolutely and would be clipped).
+  New top-bar controls must shrink or be shed by a rule; the bar must never spill over the
+  columns beside it (that was the cramped-overlap bug).
 - The board is one transformed div (translate + scale); panning and wheel-zoom only change
   it. Dragging a token uses pointer capture, patches the position at most every 140 ms and
   snaps to the square middle on drop. dragstart is prevented on tokens and the stage: a

@@ -204,9 +204,16 @@
 }
 
 .channel-split-handle:hover span,
-.channel-split.resizing .channel-split-handle span {
+.channel-split.resizing .channel-split-handle span,
+.channel-split-handle.resizing span {
   background: var(--gold-dim);
   box-shadow: none;
+}
+
+body.row-resizing,
+body.row-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
 }
 
 .channel-item .channel-name {
@@ -497,8 +504,9 @@ img.channel-emoji {
   width: var(--members-width);
   flex-shrink: 0;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg-secondary);
   border-left: 1px solid var(--panel-border);
 }
@@ -507,11 +515,37 @@ img.channel-emoji {
   display: none;
 }
 
+/* The DM Lock switch rides above the cards and stays put. */
+.right-panel-head {
+  flex-shrink: 0;
+  padding: 12px 12px 0;
+}
+
+.right-panel-head:empty {
+  display: none;
+}
+
 .right-panel-top {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px 12px 0;
+  flex: 0 0 auto;
+  max-height: 55%;
+  overflow-y: auto;
+}
+
+/* Everything under the cards (the member list here, the chat on the board). */
+.right-panel-rest {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.right-panel .search-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .right-panel .member-list-inner {

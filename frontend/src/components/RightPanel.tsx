@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { characterAvatar, userAvatar } from '../lib/avatars';
 import ChatView from './ChatView';
 import { channelPermissions, P } from '../lib/permissions';
@@ -16,6 +16,7 @@ import { TheaterCard } from './Theater';
 import { BoardCard } from './GameBoard';
 import { Avatar } from './ui';
 import { calmColor } from '../lib/format';
+import { load, save } from '../lib/storage';
 
 interface Group {
   key: string;
@@ -205,7 +206,8 @@ function MemberGroups({ channel, serverId }: { channel: Channel | undefined; ser
  * The right-hand column: in servers, the DM Lock switch, the jukebox and the
  * theater on top of the member list; in group DMs, just the members. On the
  * board, the chat takes the member list's place so the map, the channels and
- * the conversation all stay in view.
+ * the conversation all stay in view. The line under the cards drags like the
+ * channel list's text/voice splitter and can push the cards away completely.
  */
 export default function RightPanel({
   channel,
@@ -226,8 +228,58 @@ export default function RightPanel({
   const panel = useStore((s) => s.rightPanel);
   const search =
     panel.kind === 'search' && panel.serverId === serverId && (serverId !== null || panel.channelId === channel?.id) ? panel : null;
+  const showCards = serverId !== null && (hasJukebox || hasTheater || hasBoard);
+  // Share of the column the cards take; null = natural height, capped by css.
+  const [cardsFrac, setCardsFrac] = useState<number | null>(() => load<number | null>('rightCardsSplit', null));
+  const asideRef = useRef<HTMLElement>(null);
+  const cardsRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ startY: number; startH: number; panelH: number; last: number; moved: boolean; node: HTMLElement } | null>(null);
+  const onSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const node = e.currentTarget;
+    node.setPointerCapture(e.pointerId);
+    node.classList.add('resizing');
+    drag.current = {
+      startY: e.clientY,
+      startH: cardsRef.current?.getBoundingClientRect().height ?? 0,
+      panelH: asideRef.current?.getBoundingClientRect().height ?? 0,
+      last: -1,
+      moved: false,
+      node,
+    };
+    document.body.classList.add('row-resizing');
+  };
+  const onSplitMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    let h = Math.round(d.startH + (e.clientY - d.startY));
+    h = Math.max(0, Math.min(Math.round(d.panelH * 0.85), h));
+    if (h < 48) h = 0;
+    d.last = h;
+    d.moved = true;
+    const el = cardsRef.current;
+    if (el) {
+      el.style.flex = `0 0 ${h}px`;
+      el.style.maxHeight = `${h}px`;
+    }
+  };
+  const onSplitUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    document.body.classList.remove('row-resizing');
+    d?.node.classList.remove('resizing');
+    if (!d?.moved || d.last < 0) return;
+    const frac = d.panelH > 0 ? Math.round((d.last / d.panelH) * 1000) / 1000 : 0;
+    setCardsFrac(frac);
+    save('rightCardsSplit', frac);
+  };
+  const resetSplit = () => {
+    setCardsFrac(null);
+    save('rightCardsSplit', null);
+  };
   return (
     <aside
+      ref={asideRef}
       className={`right-panel scroller-thin ${open ? '' : 'collapsed'} ${search ? 'searching' : ''} ${board ? 'board' : ''}`}
       style={board && width ? { width } : undefined}
       aria-label={search ? 'Search results' : board ? 'Chat' : 'Members'}
@@ -237,11 +289,40 @@ export default function RightPanel({
       ) : (
         <>
           {serverId !== null && (
-            <div className="right-panel-top scroller-thin">
+            <div className="right-panel-head">
               <RoleplayToggle serverId={serverId} />
+            </div>
+          )}
+          {showCards && (
+            <div
+              ref={cardsRef}
+              className="right-panel-top scroller-thin"
+              style={
+                cardsFrac === null
+                  ? undefined
+                  : cardsFrac === 0
+                    ? { flex: '0 0 auto', maxHeight: 0, minHeight: 0, paddingTop: 0, overflow: 'hidden' }
+                    : { flex: `0 0 ${cardsFrac * 100}%`, maxHeight: `${cardsFrac * 100}%`, minHeight: 0 }
+              }
+            >
               {hasJukebox && <JukeboxCard serverId={serverId} />}
               {hasTheater && <TheaterCard serverId={serverId} />}
               {hasBoard && <BoardCard serverId={serverId} />}
+            </div>
+          )}
+          {showCards && (
+            <div
+              className="channel-split-handle right-cards-split"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize or hide the cards"
+              onPointerDown={onSplitDown}
+              onPointerMove={onSplitMove}
+              onPointerUp={onSplitUp}
+              onPointerCancel={onSplitUp}
+              onDoubleClick={resetSplit}
+            >
+              <span />
             </div>
           )}
           {board ? (
@@ -253,7 +334,9 @@ export default function RightPanel({
               <div className="board-chat-empty">Pick a text channel to chat here.</div>
             )
           ) : (
-            <MemberGroups channel={channel} serverId={serverId} />
+            <div className="right-panel-rest scroller-thin">
+              <MemberGroups channel={channel} serverId={serverId} />
+            </div>
           )}
         </>
       )}
