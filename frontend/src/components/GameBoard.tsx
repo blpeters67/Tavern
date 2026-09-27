@@ -856,13 +856,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const stageRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef({ x: 0, y: 0, z: 1 });
   const boardRef = useRef<Board | null>(null);
+  const dragPosRef = useRef<{ id: number; x: number; y: number; hold?: boolean; seq?: number } | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, z: 1 });
   const [gridOn, setGridOn] = useState(true);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const dragRef = useRef<{ id: number; dx: number; dy: number; sx: number; sy: number; px: number; py: number; moved: boolean; last: number } | null>(null);
-  const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number; hold?: boolean } | null>(null);
+  const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number; hold?: boolean; seq?: number } | null>(null);
   const [tool, setTool] = useState<'select' | DrawKind | 'text' | 'ruler'>('select');
   const [color, setColor] = useState(DRAW_COLORS[0]);
   const drawRef = useRef<Draft | null>(null);
@@ -872,12 +873,19 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const redoRef = useRef<Shape[]>([]);
   const [redoCount, setRedoCount] = useState(0);
   // A finished stroke shows right away; the server copy replaces it by id.
-  const [pending, setPending] = useState<Map<string, Shape>>(new Map());
-  const [localDraws, setLocalDraws] = useState<Map<number, Shape>>(new Map());
+  // Both carry the board they were drawn on: a slow save must never land on
+  // another map's display.
+  const [pending, setPending] = useState<Map<string, { boardId: number; shape: Shape }>>(new Map());
+  const [localDraws, setLocalDraws] = useState<Map<number, { boardId: number; shape: Shape }>>(new Map());
   const shapeSeq = useRef(0);
+  const holdSeq = useRef(0);
+  // Undo and redo run one at a time, in press order, so a quick second press
+  // acts on the next entry instead of re-submitting the same one.
+  const histRef = useRef<Promise<void>>(Promise.resolve());
   const patchQueues = useRef<Map<number, { running: boolean; queue: { body: Record<string, unknown>; done?: (ok: boolean) => void }[] }>>(new Map());
   const board = sb?.board ?? null;
   boardRef.current = board;
+  dragPosRef.current = dragPos;
   const meId = useStore((s) => s.me?.id ?? null);
   const myDrawings = useMemo(() => (board ? board.drawings.filter((d) => d.author_id === meId) : []), [board, meId]);
   const world = worldSize(board);
@@ -957,11 +965,11 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     if (!board || localDraws.size === 0) return;
     const have = new Set(board.drawings.map((x) => x.id));
     let gone = false;
-    for (const id of localDraws.keys()) if (have.has(id)) gone = true;
+    for (const [id, e] of localDraws) if (e.boardId === board.id && have.has(id)) gone = true;
     if (!gone) return;
     setLocalDraws((m) => {
       const next = new Map(m);
-      for (const id of next.keys()) if (have.has(id)) next.delete(id);
+      for (const [id, e] of next) if (e.boardId === board.id && have.has(id)) next.delete(id);
       return next;
     });
   }, [board, localDraws]);
@@ -988,16 +996,17 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const postShape = useCallback(async (shape: Shape): Promise<boolean> => {
     const b = boardRef.current;
     if (!b) return false;
+    const boardId = b.id; // the shape belongs to the board it was drawn on
     const key = 'p' + ++shapeSeq.current;
-    setPending((m) => new Map(m).set(key, shape));
+    setPending((m) => new Map(m).set(key, { boardId, shape }));
     try {
-      const saved = await api.post<BoardDrawing>(`/api/servers/${serverId}/board/boards/${b.id}/drawings`, shape);
+      const saved = await api.post<BoardDrawing>(`/api/servers/${serverId}/board/boards/${boardId}/drawings`, shape);
       setPending((m) => {
         const next = new Map(m);
         next.delete(key);
         return next;
       });
-      setLocalDraws((m) => new Map(m).set(saved.id, { kind: saved.kind, color: saved.color, width: saved.width, data: saved.data }));
+      setLocalDraws((m) => new Map(m).set(saved.id, { boardId, shape: { kind: saved.kind, color: saved.color, width: saved.width, data: saved.data } }));
       return true;
     } catch (err) {
       setPending((m) => {
@@ -1023,29 +1032,37 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     }
   };
 
-  const undo = useCallback(async () => {
-    const b = board;
-    const me = getState().me;
-    if (!b || !me) return;
-    const mine = b.drawings.filter((d) => d.author_id === me.id);
-    const last = mine[mine.length - 1];
-    if (!last) return;
-    try {
-      await api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings/${last.id}`);
-      redoRef.current.push({ kind: last.kind, color: last.color, width: last.width, data: last.data });
-      setRedoCount(redoRef.current.length);
-    } catch (err) {
-      toast(errorMessage(err));
-    }
-  }, [board, serverId]);
+  const undo = useCallback(() => {
+    histRef.current = histRef.current
+      .then(async () => {
+        const b = boardRef.current;
+        const me = getState().me;
+        if (!b || !me) return;
+        const mine = b.drawings.filter((d) => d.author_id === me.id);
+        const last = mine[mine.length - 1];
+        if (!last) return;
+        try {
+          await api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings/${last.id}`);
+          redoRef.current.push({ kind: last.kind, color: last.color, width: last.width, data: last.data });
+          setRedoCount(redoRef.current.length);
+        } catch (err) {
+          toast(errorMessage(err));
+        }
+      })
+      .catch(() => {});
+  }, [serverId]);
 
-  const redo = useCallback(async () => {
-    const p = redoRef.current[redoRef.current.length - 1];
-    if (!p || !boardRef.current) return;
-    if (await postShape(p)) {
-      redoRef.current.pop(); // a failed redo stays put for another try
-      setRedoCount(redoRef.current.length);
-    }
+  const redo = useCallback(() => {
+    histRef.current = histRef.current
+      .then(async () => {
+        const p = redoRef.current[redoRef.current.length - 1];
+        if (!p || !boardRef.current) return;
+        if (await postShape(p)) {
+          redoRef.current.pop(); // a failed redo stays put for another try
+          setRedoCount(redoRef.current.length);
+        }
+      })
+      .catch(() => {});
   }, [postShape]);
 
   const pickTool = (t: 'select' | DrawKind | 'text' | 'ruler') => {
@@ -1188,9 +1205,12 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     if (!canMoveToken(t)) return; // let the board pan from over a token you can't move
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    // Start from what is on screen: while a drop still waits for the server,
+    // the displayed spot is the truth, not the older confirmed coordinates.
+    const shown = dragPosRef.current && dragPosRef.current.id === t.id ? dragPosRef.current : { x: t.x, y: t.y };
     const w = toWorld(e.clientX, e.clientY);
-    dragRef.current = { id: t.id, dx: t.x - w.x, dy: t.y - w.y, sx: w.x, sy: w.y, px: t.x, py: t.y, moved: false, last: 0 };
-    setDragPos({ id: t.id, x: t.x, y: t.y });
+    dragRef.current = { id: t.id, dx: shown.x - w.x, dy: shown.y - w.y, sx: w.x, sy: w.y, px: shown.x, py: shown.y, moved: false, last: 0 };
+    setDragPos({ id: t.id, x: shown.x, y: shown.y });
   }, [canMoveToken, toWorld]);
 
   const onTokenMove = useCallback((e: ReactPointerEvent<HTMLDivElement>, t: BoardToken) => {
@@ -1224,9 +1244,10 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       return;
     }
     const s = snapPoint(boardRef.current, d.px, d.py);
-    setDragPos({ id: t.id, x: s.x, y: s.y, hold: true });
-    queuePatch(t.id, { x: s.x, y: s.y }, { onDone: (ok) => { if (!ok) setDragPos((p) => (p && p.hold && p.id === t.id ? null : p)); } });
-    window.setTimeout(() => setDragPos((p) => (p && p.hold && p.id === t.id ? null : p)), 4000);
+    const seq = ++holdSeq.current;
+    setDragPos({ id: t.id, x: s.x, y: s.y, hold: true, seq });
+    queuePatch(t.id, { x: s.x, y: s.y }, { onDone: (ok) => { if (!ok) setDragPos((p) => (p && p.hold && p.id === t.id && p.seq === seq ? null : p)); } });
+    window.setTimeout(() => setDragPos((p) => (p && p.hold && p.id === t.id && p.seq === seq ? null : p)), 4000);
   }, [queuePatch, serverId]);
 
   const onTokenMenu = useCallback((e: React.MouseEvent<HTMLDivElement>, t: BoardToken) => {
@@ -1378,13 +1399,15 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 {board.drawings.map((d) => (
                   <DrawingShape key={d.id} d={d} />
                 ))}
-                {[...pending.entries()].map(([k, s]) => (
-                  <DrawingShape key={k} d={s} />
-                ))}
+                {[...pending.entries()]
+                  .filter(([, e]) => e.boardId === board.id)
+                  .map(([k, e]) => (
+                    <DrawingShape key={k} d={e.shape} />
+                  ))}
                 {[...localDraws.entries()]
-                  .filter(([id]) => !board.drawings.some((d) => d.id === id))
-                  .map(([id, s]) => (
-                    <DrawingShape key={`l${id}`} d={s} />
+                  .filter(([id, e]) => e.boardId === board.id && !board.drawings.some((d) => d.id === id))
+                  .map(([id, e]) => (
+                    <DrawingShape key={`l${id}`} d={e.shape} />
                   ))}
               </svg>
               {board.tokens.map((t) => {

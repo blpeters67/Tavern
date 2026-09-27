@@ -494,8 +494,16 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   rebound), and per-token PATCHes run one at a time with drag moves coalescing, so on a slow
   link an older move can't overtake the drop.
 - A finished stroke shows at once as a pending drawing and is swapped for the saved copy by
-  id (no blink while the POST is in flight, and the live event can't double it). Redo history
-  resets when the active board changes and a failed redo keeps its entry.
+  id (no blink while the POST is in flight, and the live event can't double it). Both the
+  pending and the just-saved stand-in carry their board id and render only while that board
+  is open — switching maps mid-save leaves no ghost on the new map. Redo history resets when
+  the active board changes and a failed redo keeps its entry.
+- Undo and redo run through a per-room queue, one press at a time: a quick double-press acts
+  on the next entry (never re-submitting the same stroke or eating another's entry).
+- A token drag starts from what is on screen: while a drop still awaits the server, the
+  displayed spot wins over the older confirmed coordinates, so re-grabbing a just-dropped
+  token never snaps it back. Each drop's 4 s fallback timer carries a sequence number, so an
+  earlier drop's timer cannot clear a later hold.
 - Saved strokes and tokens are memoized (stable token props), so panning, drawing and
   dragging don't re-render every stroke on the board.
 - While the board shows a channel's chat, AppShell does NOT mount the original ChatView
