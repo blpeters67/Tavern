@@ -1,6 +1,6 @@
 # Tavern
 
-A self-hosted, Discord-style chat for roleplaying with friends. It has servers, text channels, voice spaces, roles, DMs, replies, pins, reactions, custom emoji, uploads, link previews and search. On top of that it has the tabletop pieces: characters with full D&D 5e sheets, dice everyone sees roll, a narrator voice for the Dungeon Master, text effects for dramatic moments, a jukebox that plays the same song at the same moment for everyone listening, a theater that does the same for videos, and a game board where everyone's tokens sit on the same battle map.
+A self-hosted, Discord-style chat for roleplaying with friends. It has servers, text channels, voice spaces, roles, DMs, replies, pins, reactions, custom emoji, uploads, link previews and search. On top of that it has the tabletop pieces: characters with full D&D 5e sheets, dice everyone sees roll, a narrator voice for the Dungeon Master, text effects for dramatic moments, a jukebox that plays the same song at the same moment for everyone listening, a theater that does the same for videos, and a game board where everyone's tokens sit on the same battle map and anyone can draw on it.
 
 ```
 backend/    FastAPI + SQLite (Python 3.12): API, live gateway, voice signalling, jukebox, theater, dice
@@ -114,6 +114,7 @@ The card under the theater. It's a shared battle map: everyone looks at the same
 - **Background:** upload a picture (PNG or JPG, 64 MB by default) and it becomes the map. The grid sits on top, with a square size you pick.
 - **Tokens:** the Dungeon Master places monsters, NPCs and markers from **Place Token** (name, ring colour, optional hit points) and can drop any character onto the board. Players get a button that puts their own character on too.
 - **Moving around:** drag a token where you want it and it snaps to the square; drag the map to pan, scroll to zoom, **Fit** brings it back into view; the grid toggle hides the lines. Clicking a character's token opens their sheet.
+- **Drawing on the map:** a pen, arrows, rectangles, ovals and text labels in five colours, with **Undo** (Ctrl+Z) and **Redo** (Ctrl+Shift+Z) for your own strokes. The ruler measures in squares and feet while you drag it (Esc hides it), and whoever runs the game can clear every drawing at once.
 - **Rings and hit points:** green for allies, grey for neutrals, red for enemies (right-click a token to change its ring). A free token carries its own hit-point bar; a character's follows that character's sheet.
 - The avatars in the board's top bar (and on its card) show who has the board open.
 

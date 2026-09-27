@@ -12,20 +12,29 @@ import { useCollapsed } from '../lib/panelPrefs';
 import { closeBoard, openBoard, openContextMenu, openModal, openSheet } from '../store/actions';
 import { canControlBoard, displayName, myCharacters } from '../store/selectors';
 import { getState, useStore } from '../store/store';
-import type { Board, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
+import type { Board, BoardDrawing, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
 import { ChannelType } from '../store/types';
 import {
   Icon,
   mdiAccountPlus,
   mdiArrowExpand,
+  mdiArrowTopRight,
   mdiChevronDown,
   mdiClose,
   mdiCursorDefault,
+  mdiDeleteSweepOutline,
+  mdiDraw,
+  mdiEllipseOutline,
+  mdiFormatText,
   mdiImage,
   mdiMinus,
   mdiPencil,
   mdiPlus,
+  mdiRectangleOutline,
+  mdiRedo,
+  mdiRuler,
   mdiTrashCanOutline,
+  mdiUndo,
   mdiViewGrid,
 } from './icons';
 import { CardEye } from './Jukebox';
@@ -59,6 +68,9 @@ function tokenImage(t: BoardToken, characters: Record<number, Character | undefi
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
+
+/** What the drawing tools paint with; the first one is the default. */
+const DRAW_COLORS = ['#e5484d', '#f2f4f8', '#e0b252', '#83c5ff', '#3dd68c'];
 
 // ---------------------------------------------------------------------------
 // The card in the right-hand panel
@@ -303,6 +315,73 @@ function HpModal({ serverId, board, token, onClose }: { serverId: number; board:
   );
 }
 
+function TextLabelModal({ serverId, board, at, color, onClose }: { serverId: number; board: Board; at: { x: number; y: number }; color: string; onClose: () => void }) {
+  const [text, setText] = useState('');
+  const [tone, setTone] = useState(color);
+  const [size, setSize] = useState(24);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!text.trim() || saving) return;
+    setSaving(true);
+    try {
+      await api.post(`/api/servers/${serverId}/board/boards/${board.id}/drawings`, {
+        kind: 'text',
+        color: tone,
+        width: 1,
+        data: { at: [r1(at.x), r1(at.y)], text: text.trim(), size },
+      });
+      onClose();
+    } catch (err) {
+      toast(errorMessage(err));
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      title="Write on the map"
+      onClose={onClose}
+      footer={
+        <>
+          <Button look="link" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} loading={saving} disabled={!text.trim()}>
+            Place it
+          </Button>
+        </>
+      }
+    >
+      <Field label="Text" hint="A label, a battle cry, a name for that suspicious door">
+        <TextInput
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          maxLength={500}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void save();
+          }}
+        />
+      </Field>
+      <Field label="Size">
+        <div className="board-text-sizes">
+          {([[16, 'Small'], [24, 'Medium'], [40, 'Large']] as const).map(([n, label]) => (
+            <button key={n} type="button" className={`board-size-chip ${size === n ? 'on' : ''}`} onClick={() => setSize(n)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <Field label="Color">
+        <div className="board-color-row">
+          {DRAW_COLORS.map((c) => (
+            <button key={c} type="button" className={`board-palette-dot ${tone === c ? 'on' : ''}`} style={{ background: c }} aria-label={`Color ${c}`} onClick={() => setTone(c)} />
+          ))}
+        </div>
+      </Field>
+    </Modal>
+  );
+}
+
 function DispositionPick({ value, onChange }: { value: Disposition; onChange: (d: Disposition) => void }) {
   return (
     <div className="board-disp-pick">
@@ -470,6 +549,83 @@ const TokenView = memo(function TokenView({
     </div>
   );
 });
+
+// ---------------------------------------------------------------------------
+// Drawings: pen strokes, arrows, shapes and text (the ruler stays local)
+// ---------------------------------------------------------------------------
+
+/** What the drawing tools paint. The server keeps the same shape. */
+type DrawKind = 'pen' | 'arrow' | 'rect' | 'ellipse';
+type Shape = { kind: BoardDrawing['kind']; color: string; width: number; data: BoardDrawing['data'] };
+type Pt = { x: number; y: number };
+type Draft = { kind: DrawKind; from: Pt; to: Pt; points: [number, number][] };
+
+const nf1 = (n: number) => String(Math.round(n * 10) / 10);
+
+/** A draft (still under the pointer) in the shape the renderer wants. */
+function draftShape(d: Draft, color: string): Shape {
+  if (d.kind === 'pen') return { kind: 'pen', color, width: 3, data: { points: d.points.map((p) => [r1(p[0]), r1(p[1])] as [number, number]) } };
+  return { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
+}
+
+function DrawingShape({ d, ghost }: { d: Shape; ghost?: boolean }) {
+  const common = { stroke: d.color, strokeWidth: d.width, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  if (d.kind === 'pen') {
+    const data = d.data as { points: [number, number][] };
+    return <polyline points={data.points.map((p) => p.join(',')).join(' ')} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+  }
+  if (d.kind === 'text') {
+    const data = d.data as { at: [number, number]; text: string; size: number };
+    return (
+      <text x={data.at[0]} y={data.at[1]} fill={d.color} fontSize={data.size} opacity={ghost ? 0.85 : 1} style={{ paintOrder: 'stroke', stroke: 'rgba(10, 12, 16, 0.7)', strokeWidth: Math.max(2, data.size / 8) }}>
+        {data.text}
+      </text>
+    );
+  }
+  const data = d.data as { from: [number, number]; to: [number, number] };
+  const [fx, fy] = data.from;
+  const [tx, ty] = data.to;
+  if (d.kind === 'rect') {
+    return <rect x={Math.min(fx, tx)} y={Math.min(fy, ty)} width={Math.abs(tx - fx)} height={Math.abs(ty - fy)} rx={2} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+  }
+  if (d.kind === 'ellipse') {
+    return <ellipse cx={(fx + tx) / 2} cy={(fy + ty) / 2} rx={Math.abs(tx - fx) / 2} ry={Math.abs(ty - fy) / 2} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+  }
+  // The arrow: a shaft plus a head that stops short of the tip.
+  const len = Math.hypot(tx - fx, ty - fy) || 1;
+  const ux = (tx - fx) / len;
+  const uy = (ty - fy) / len;
+  const head = Math.min(30, Math.max(12, len * 0.32));
+  const spread = 6 + d.width * 1.9;
+  const bx = tx - ux * head;
+  const by = ty - uy * head;
+  const nx = -uy;
+  const ny = ux;
+  return (
+    <g opacity={ghost ? 0.85 : 1}>
+      <line x1={fx} y1={fy} x2={tx - ux * head * 0.7} y2={ty - uy * head * 0.7} stroke={d.color} strokeWidth={d.width} strokeLinecap="round" />
+      <polygon points={`${tx},${ty} ${bx + nx * spread},${by + ny * spread} ${bx - nx * spread},${by - ny * spread}`} fill={d.color} />
+    </g>
+  );
+}
+
+/** The ruler: a dashed line with the distance on it. Local to whoever drags it. */
+function RulerMark({ a, b, g }: { a: Pt; b: Pt; g: number }) {
+  const sq = Math.hypot(b.x - a.x, b.y - a.y) / g;
+  const label = `${nf1(sq)} sq · ${nf1(sq * 5)} ft`;
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  return (
+    <g className="board-ruler">
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#f2f4f8" strokeWidth={2} strokeDasharray="7 5" vectorEffect="non-scaling-stroke" />
+      <circle cx={a.x} cy={a.y} r={4} fill="#f2f4f8" />
+      <circle cx={b.x} cy={b.y} r={4} fill="#f2f4f8" />
+      <text x={mx} y={my - 12} textAnchor="middle" fill="#f2f4f8" fontSize={22} style={{ paintOrder: 'stroke', stroke: 'rgba(10, 12, 16, 0.75)', strokeWidth: 5 }}>
+        {label}
+      </text>
+    </g>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // The bars around the board
@@ -704,7 +860,17 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const panRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const dragRef = useRef<{ id: number; dx: number; dy: number; sx: number; sy: number; px: number; py: number; moved: boolean; last: number } | null>(null);
   const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number } | null>(null);
+  const [tool, setTool] = useState<'select' | DrawKind | 'text' | 'ruler'>('select');
+  const [color, setColor] = useState(DRAW_COLORS[0]);
+  const drawRef = useRef<Draft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const rulerRef = useRef<{ a: Pt; b: Pt } | null>(null);
+  const [ruler, setRuler] = useState<{ a: Pt; b: Pt } | null>(null);
+  const redoRef = useRef<Shape[]>([]);
+  const [redoCount, setRedoCount] = useState(0);
   const board = sb?.board ?? null;
+  const meId = useStore((s) => s.me?.id ?? null);
+  const myDrawings = useMemo(() => (board ? board.drawings.filter((d) => d.author_id === meId) : []), [board, meId]);
   const world = worldSize(board);
 
   viewRef.current = view;
@@ -718,16 +884,6 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       gateway.send(12, { server_id: serverId, viewing: false });
     };
   }, [serverId]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Escape closes the board only when nothing else (a modal, a sheet, a menu) is up.
-      const s = getState();
-      if (e.key === 'Escape' && !s.modals.length && !s.sheetView && !s.contextMenu) closeBoard();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   const fit = useCallback(() => {
     const el = stageRef.current;
@@ -789,20 +945,146 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     return snapPoint(board, (rect.width / 2 - v.x) / v.z, (rect.height / 2 - v.y) / v.z);
   }, [board, world.w, world.h]);
 
+  const saveDrawing = async (d: Draft) => {
+    if (!board) return;
+    const tooSmall = d.kind === 'pen' ? d.points.length < 2 : Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < 2;
+    if (tooSmall) return;
+    const payload: Shape =
+      d.kind === 'pen'
+        ? { kind: 'pen', color, width: 3, data: { points: d.points.map((p) => [r1(p[0]), r1(p[1])] as [number, number]) } }
+        : { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
+    try {
+      await api.post(`/api/servers/${serverId}/board/boards/${board.id}/drawings`, payload);
+      redoRef.current = [];
+      setRedoCount(0); // a fresh stroke starts a new undo line
+    } catch (err) {
+      toast(errorMessage(err));
+    }
+  };
+
+  const undo = useCallback(async () => {
+    const b = board;
+    const me = getState().me;
+    if (!b || !me) return;
+    const mine = b.drawings.filter((d) => d.author_id === me.id);
+    const last = mine[mine.length - 1];
+    if (!last) return;
+    try {
+      await api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings/${last.id}`);
+      redoRef.current.push({ kind: last.kind, color: last.color, width: last.width, data: last.data });
+      setRedoCount(redoRef.current.length);
+    } catch (err) {
+      toast(errorMessage(err));
+    }
+  }, [board, serverId]);
+
+  const redo = useCallback(async () => {
+    const b = board;
+    const p = redoRef.current.pop();
+    if (!b || !p) return;
+    setRedoCount(redoRef.current.length);
+    try {
+      await api.post(`/api/servers/${serverId}/board/boards/${b.id}/drawings`, p);
+    } catch (err) {
+      toast(errorMessage(err));
+    }
+  }, [board, serverId]);
+
+  const pickTool = (t: 'select' | DrawKind | 'text' | 'ruler') => {
+    setTool(t);
+    if (t !== 'ruler') setRuler(null);
+  };
+
+  const clearDrawings = () => {
+    const b = board;
+    if (!b) return;
+    openModal((close) => (
+      <Modal
+        title="Clear every drawing?"
+        onClose={close}
+        footer={
+          <>
+            <Button look="link" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              look="danger"
+              onClick={() => {
+                close();
+                redoRef.current = [];
+                setRedoCount(0);
+                api.del(`/api/servers/${serverId}/board/boards/${b.id}/drawings`).catch((err) => toast(errorMessage(err)));
+              }}
+            >
+              Clear
+            </Button>
+          </>
+        }
+      >
+        <p>Every stroke, arrow, shape and label comes off “{b.name}” for everyone.</p>
+      </Modal>
+    ));
+  };
+
   const onStagePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 && e.button !== 1) return;
     const el = stageRef.current;
     if (!el) return;
+    if (e.button === 1 || (e.button === 0 && tool === 'select')) {
+      el.setPointerCapture(e.pointerId);
+      panRef.current = { sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y };
+      return;
+    }
+    if (e.button !== 0) return;
+    if (!board) return;
+    e.preventDefault();
     el.setPointerCapture(e.pointerId);
-    panRef.current = { sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y };
+    const w = toWorld(e.clientX, e.clientY);
+    if (tool === 'text') {
+      openModal((close) => <TextLabelModal serverId={serverId} board={board} at={w} color={color} onClose={close} />);
+      return;
+    }
+    if (tool === 'ruler') {
+      rulerRef.current = { a: w, b: w };
+      setRuler({ a: w, b: w });
+      return;
+    }
+    drawRef.current = { kind: tool as DrawKind, from: w, to: w, points: tool === 'pen' ? [[w.x, w.y] as [number, number]] : [] };
+    setDraft({ ...drawRef.current, points: [...drawRef.current.points] });
   };
   const onStagePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drawRef.current;
+    if (d) {
+      const w = toWorld(e.clientX, e.clientY);
+      if (d.kind === 'pen') {
+        const last = d.points[d.points.length - 1];
+        if (d.points.length < 3000 && Math.hypot(w.x - last[0], w.y - last[1]) > 2.5 / viewRef.current.z) {
+          d.points = [...d.points, [w.x, w.y] as [number, number]];
+          setDraft({ ...d });
+        }
+      } else {
+        d.to = w;
+        setDraft({ ...d });
+      }
+      return;
+    }
+    const r = rulerRef.current;
+    if (r) {
+      rulerRef.current = { a: r.a, b: toWorld(e.clientX, e.clientY) };
+      setRuler(rulerRef.current);
+      return;
+    }
     const p = panRef.current;
     if (!p) return;
     setView((v) => ({ ...v, x: p.ox + (e.clientX - p.sx), y: p.oy + (e.clientY - p.sy) }));
   };
   const onStagePointerUp = () => {
     panRef.current = null;
+    rulerRef.current = null;
+    const d = drawRef.current;
+    drawRef.current = null;
+    if (!d) return;
+    setDraft(null);
+    void saveDrawing(d);
   };
 
   const patchToken = async (tokenId: number, body: Record<string, unknown>) => {
@@ -923,6 +1205,35 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       });
   };
 
+  // Ctrl+Z / Ctrl+Shift+Z: undo and redo my own drawings; Escape clears the ruler first.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const s = getState();
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (e.key === 'Escape' && !s.modals.length && !s.sheetView && !s.contextMenu) {
+        if (ruler) {
+          setRuler(null);
+          return;
+        }
+        closeBoard();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !typing && !s.modals.length) {
+        const k = e.key.toLowerCase();
+        if (k === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          void undo();
+        } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          void redo();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ruler, undo, redo]);
+
   if (!sb) return <div className="board-room" />;
   if (!board) {
     return (
@@ -963,7 +1274,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
         <div className="board-stage-wrap">
           <div
             ref={stageRef}
-            className="board-stage"
+            className={`board-stage tool-${tool}`}
             onPointerDown={onStagePointerDown}
             onPointerMove={onStagePointerMove}
             onPointerUp={onStagePointerUp}
@@ -980,6 +1291,11 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
             >
               {board.background_url ? <img className="board-bg" src={board.background_url} alt="" draggable={false} /> : <div className="board-bg board-bg-plain" />}
               {gridOn && <div className="board-grid" style={{ backgroundSize: `${board.grid_size}px ${board.grid_size}px` }} />}
+              <svg className="board-draw-layer" viewBox={`0 0 ${world.w} ${world.h}`} width={world.w} height={world.h} aria-hidden="true">
+                {board.drawings.map((d) => (
+                  <DrawingShape key={d.id} d={d} />
+                ))}
+              </svg>
               {board.tokens.map((t) => {
                 const pos = dragPos && dragPos.id === t.id ? dragPos : { x: t.x, y: t.y };
                 return (
@@ -998,10 +1314,14 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                   />
                 );
               })}
+              <svg className="board-draw-layer board-draw-top" viewBox={`0 0 ${world.w} ${world.h}`} width={world.w} height={world.h} aria-hidden="true">
+                {draft && <DrawingShape d={draftShape(draft, color)} ghost />}
+                {ruler && <RulerMark a={ruler.a} b={ruler.b} g={board.grid_size} />}
+              </svg>
             </div>
           </div>
           <div className="board-tools">
-            <button className="board-tool active" aria-label="Select and move" {...tip('Select — drag the board to move it, drag your token to move it')}>
+            <button className={`board-tool ${tool === 'select' ? 'active' : ''}`} aria-label="Select" onClick={() => pickTool('select')} {...tip('Select — drag the board to pan, drag a token to move it (middle-drag always pans)')}>
               <Icon path={mdiCursorDefault} size={20} />
             </button>
             {canControl && (
@@ -1018,6 +1338,44 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
               <button className="board-tool" aria-label="Change the background" onClick={() => fileInput.current?.click()} {...tip('Change the background picture')}>
                 <Icon path={mdiImage} size={20} />
               </button>
+            )}
+            <span className="board-tool-sep" />
+            <button className={`board-tool ${tool === 'pen' ? 'active' : ''}`} aria-label="Draw freehand" onClick={() => pickTool('pen')} {...tip('Draw — drag to sketch on the map')}>
+              <Icon path={mdiDraw} size={20} />
+            </button>
+            <button className={`board-tool ${tool === 'arrow' ? 'active' : ''}`} aria-label="Arrow" onClick={() => pickTool('arrow')} {...tip('Arrow — drag from where it starts to where it points')}>
+              <Icon path={mdiArrowTopRight} size={20} />
+            </button>
+            <button className={`board-tool ${tool === 'rect' ? 'active' : ''}`} aria-label="Rectangle" onClick={() => pickTool('rect')} {...tip('Rectangle — drag out a box (a wall, a zone, a room)')}>
+              <Icon path={mdiRectangleOutline} size={20} />
+            </button>
+            <button className={`board-tool ${tool === 'ellipse' ? 'active' : ''}`} aria-label="Circle or oval" onClick={() => pickTool('ellipse')} {...tip('Circle — drag out an oval (a spell area, a campfire)')}>
+              <Icon path={mdiEllipseOutline} size={20} />
+            </button>
+            <button className={`board-tool ${tool === 'text' ? 'active' : ''}`} aria-label="Text" onClick={() => pickTool('text')} {...tip('Text — click the map to write a label')}>
+              <Icon path={mdiFormatText} size={20} />
+            </button>
+            <button className={`board-tool ${tool === 'ruler' ? 'active' : ''}`} aria-label="Ruler" onClick={() => pickTool('ruler')} {...tip('Ruler — drag to measure; the distance shows on the line')}>
+              <Icon path={mdiRuler} size={20} />
+            </button>
+            <span className="board-tool-sep" />
+            <button className="board-tool" aria-label="Undo" disabled={myDrawings.length === 0} onClick={() => void undo()} {...tip('Undo my last drawing (Ctrl+Z)')}>
+              <Icon path={mdiUndo} size={20} />
+            </button>
+            <button className="board-tool" aria-label="Redo" disabled={redoCount === 0} onClick={() => void redo()} {...tip('Redo (Ctrl+Shift+Z)')}>
+              <Icon path={mdiRedo} size={20} />
+            </button>
+            {canControl && board.drawings.length > 0 && (
+              <button className="board-tool" aria-label="Clear drawings" onClick={clearDrawings} {...tip('Clear every drawing')}>
+                <Icon path={mdiDeleteSweepOutline} size={20} />
+              </button>
+            )}
+            {tool !== 'select' && tool !== 'ruler' && (
+              <div className="board-palette">
+                {DRAW_COLORS.map((c) => (
+                  <button key={c} type="button" className={`board-palette-dot ${color === c ? 'on' : ''}`} style={{ background: c }} aria-label={`Color ${c}`} onClick={() => setColor(c)} />
+                ))}
+              </div>
             )}
           </div>
           <TokenTray serverId={serverId} board={board} at={centerPoint} />
