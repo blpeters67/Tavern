@@ -330,7 +330,11 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 - Changes publish like the jukebox: BOARD_STATE, BOARD_TOKEN_CREATE/UPDATE/DELETE,
   BOARD_DRAW_ADD/DELETE, BOARD_DRAWS_CLEAR, BOARD_VIEWERS. READY carries
   {boards, active_id, board, viewers}. Op 12 is "I have the game board open"
-  (viewing: true) and drives the viewers list; leaving drops you from it.
+  (viewing: true) and drives the viewers list; leaving drops you from it. Op 13 carries
+  a live pointer (x/y in board units + the held tool): BoardManager.set_cursor relays
+  BOARD_CURSOR to the other viewers (40 ms throttle; a tool change always passes) and
+  remembers the last spot so a joiner gets a BOARD_CURSORS snapshot in one go. Pointers
+  from non-viewers are dropped, a leaver's pointer is forgotten, and op 13 needs no DB.
 
 
 ==========================================================================================
@@ -484,6 +488,20 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   live mini preview and who has it open), BoardRoom (the board in the middle with the
   channel's real ChatView beside it), the DM's token palette and the small modals;
   styles/board.css styles it; the BOARD_* handlers live in store.ts.
+- The dice tool opens the SAME DiceTray the message box uses (channelId = the board's
+  channel) inside .board-dice-pop, centered under the dice button; the old compact NdX tray
+  is gone. BoardTopBar's zoom group also carries the live-cursors toggle (mdiMouseVariant):
+  BOARD_CURSOR/BOARD_CURSORS feed a direct-DOM layer (.board-cursors inside .board-stage,
+  ref-driven — no React state per move), CURSOR_ICONS maps tool -> MDI path for the tag,
+  positions are stage coords (view + world * z, re-placed when the view changes), and the
+  layer prunes by sb.viewers. Sends are throttled 70 ms from onStagePointerMove plus once on
+  tool change; off (localStorage tavern.boardCursors, default on) neither renders nor sends.
+- BoardDice: BoardRoll.card carries {name, title, expression, total, avatar, color, outcome};
+  cardTexture draws the plate under the dice (avatar circle with the roller's colour ring,
+  "<name> rolled — <title>", then the expression, "=" and the total in gold — green/red
+  when a DC settles it). A roll where any die dropped (advantage picks) paints the kept die
+  with a green emissive and gives dropped dice base opacity 0.34 (Die.base multiplies every
+  fade so they stay ghostly).
 - The board is a main VIEW, not an overlay: AppShell renders BoardRoom whenever the open
   board's server is the current one (boardView.serverId === server.id, community page wins),
   so the left channel list and the right column stay in place. The middle's chat is gone

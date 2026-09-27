@@ -28,6 +28,20 @@ export interface BoardRoll {
   dice: BoardDie[];
   /** Who rolled, shown under the dice. */
   who?: string;
+  /** The result card under the dice: who rolled what, and the headline number. */
+  card?: BoardCard;
+}
+
+export interface BoardCard {
+  name: string;
+  title: string;
+  expression: string;
+  total: string;
+  avatar?: string | null;
+  /** The roller's colour (a character's), for their name on the card. */
+  color?: string | null;
+  adv?: 'adv' | 'dis' | null;
+  outcome?: 'success' | 'failure' | null;
 }
 
 type Three = typeof import('three');
@@ -160,34 +174,105 @@ function getShadowTexture(T: Three): import('three').Texture {
   return shadowTexture;
 }
 
-/** A small name tag for the roller, drawn on a sprite. */
-function whoTexture(T: Three, who: string): import('three').Texture {
+/** The result card under the dice: the roller's picture, "<name> rolled —
+ *  <title>", and the expression with the total in gold. Drawn on a canvas
+ *  sprite; the avatar drops in when it finishes loading. */
+function cardTexture(T: Three, card: BoardCard): import('three').Texture {
+  const W = 900;
+  const H = 200;
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 128;
+  c.width = W;
+  c.height = H;
   const ctx = c.getContext('2d')!;
-  const x = 4;
-  const y = 12;
-  const w = 504;
-  const h = 104;
-  const r = 40;
-  ctx.fillStyle = 'rgba(10, 12, 16, 0.82)';
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = BASE;
-  ctx.font = "700 58px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(who.slice(0, 20), c.width / 2, c.height / 2 + 2);
-  const t = new T.CanvasTexture(c);
-  t.colorSpace = T.SRGBColorSpace;
-  return t;
+  const tex = new T.CanvasTexture(c);
+  tex.colorSpace = T.SRGBColorSpace;
+  const ui = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  const totalColor = card.outcome === 'success' ? '#43b581' : card.outcome === 'failure' ? '#ed4245' : '#e0b252';
+  const img = card.avatar ? new Image() : null;
+  const roundRect = (x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+  const draw = () => {
+    ctx.clearRect(0, 0, W, H);
+    roundRect(5, 5, W - 10, H - 10, 30);
+    ctx.fillStyle = 'rgba(12, 14, 19, 0.9)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.stroke();
+    // the roller's picture (their initial while it loads, or without one)
+    const ax = 88;
+    const ay = H / 2;
+    const ar = 47;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.clip();
+    if (img && img.complete && img.naturalWidth) {
+      ctx.drawImage(img, ax - ar, ay - ar, ar * 2, ar * 2);
+    } else {
+      ctx.fillStyle = 'rgba(96, 108, 214, 0.4)';
+      ctx.fillRect(ax - ar, ay - ar, ar * 2, ar * 2);
+      ctx.fillStyle = BASE;
+      ctx.font = `700 48px ${ui}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText((card.name[0] ?? '?').toUpperCase(), ax, ay + 3);
+    }
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(ax, ay, ar, 0, Math.PI * 2);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = card.color || 'rgba(122, 162, 247, 0.6)';
+    ctx.stroke();
+    // "<name> rolled — <title>", trimmed to fit
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const tx = ax + ar + 26;
+    const room = W - tx - (card.total ? 240 : 30);
+    const nameFont = `700 42px ${ui}`;
+    const restFont = `500 36px ${ui}`;
+    ctx.font = nameFont;
+    const nameW = ctx.measureText(card.name).width;
+    let title = card.title;
+    ctx.font = restFont;
+    const lineW = () => nameW + ctx.measureText(` rolled — ${title}`).width;
+    while (lineW() > room && title.length > 4) title = title.slice(0, -2);
+    if (lineW() > room) title = title.slice(0, 3) + '…';
+    ctx.font = nameFont;
+    ctx.fillStyle = card.color || '#8ab4f8';
+    ctx.fillText(card.name, tx, 86);
+    ctx.font = restFont;
+    ctx.fillStyle = 'rgba(214, 219, 232, 0.92)';
+    ctx.fillText(` rolled — ${title}`, tx + nameW, 86);
+    // "2d20kh1 = 17"
+    if (card.total) {
+      ctx.font = restFont;
+      ctx.fillStyle = 'rgba(174, 178, 191, 0.95)';
+      ctx.fillText(card.expression, tx, 150);
+      let ex = tx + ctx.measureText(card.expression).width;
+      ctx.fillText(' =', ex, 150);
+      ex += ctx.measureText(' =').width;
+      ctx.font = `700 58px ${ui}`;
+      ctx.fillStyle = totalColor;
+      ctx.fillText(card.total, ex + 6, 160);
+    }
+  };
+  if (img) {
+    img.onload = () => {
+      draw();
+      tex.needsUpdate = true;
+    };
+    img.src = card.avatar!;
+  }
+  draw();
+  return tex;
 }
 
 let shadowGeo: Geo | null = null;
@@ -489,6 +574,8 @@ interface Die {
   to: { x: number; z: number };
   spinAxis: Vec3;
   spinRate: number;
+  /** Opacity multiplier: below 1 for a die the roll threw away. */
+  base: number;
   settleQ: import('three').Quaternion;
   startQ: import('three').Quaternion;
   phase: 0 | 1 | 2;
@@ -546,7 +633,7 @@ function settleQuat(T: Three, dg: DieGeo, value: number, down: boolean): import(
   return yaw.multiply(faceQ);
 }
 
-function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: number, count: number, spanX: number): Die {
+function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: number, count: number, spanX: number, pick: boolean): Die {
   const size = world.dieSize;
   // Lay the dice out inside the width the camera can actually show: a wide
   // stage fits six in a row, a narrow one wraps to more rows.
@@ -571,6 +658,14 @@ function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: numb
     transparent: true,
   });
   if (die.drop) mat.color = new T.Color(0xb9bec7); // a dropped die reads dimmer
+  // Advantage / Disadvantage: the kept die glows green, the one the roll threw
+  // away goes see-through, so the pick is obvious from across the table.
+  const dim = die.drop && pick;
+  if (dim) mat.opacity = 0.34;
+  if (pick && !die.drop) {
+    mat.emissive = new T.Color(0x2f9e63);
+    mat.emissiveIntensity = 0.55;
+  }
   const body = new T.Mesh(dg.geo, mat);
   body.scale.setScalar(size);
   const group = new T.Group();
@@ -623,6 +718,7 @@ function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: numb
     to,
     spinAxis,
     spinRate: 9 + Math.random() * 7,
+    base: dim ? 0.34 : 1,
     settleQ,
     startQ: new T.Quaternion(),
     phase: 0,
@@ -691,7 +787,7 @@ function tick(world: World) {
     }
     if (d.badge && d.phase === 2) {
       const bu = Math.min(1, Math.max(0, (t - LAND_MS) / 160));
-      d.badge.material.opacity = bu;
+      d.badge.material.opacity = bu * d.base;
       const s = size * 0.6 * (0.7 + 0.3 * easeOutCubic(bu));
       d.badge.scale.set(s, s, 1);
     }
@@ -711,7 +807,7 @@ function tick(world: World) {
   if (t > STAY_MS) {
     const f = Math.min(1, (t - STAY_MS) / FADE_MS);
     for (const d of world.dice) {
-      const o = d.drop ? (1 - f) * 0.85 : 1 - f;
+      const o = d.base * (1 - f);
       d.mat.opacity = o;
       if (d.badge) d.badge.material.opacity = Math.min(d.badge.material.opacity, o);
       else d.shadow.material.opacity = Math.min(d.shadow.material.opacity, 0.32 * o);
@@ -848,21 +944,23 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
       world.raf = 0;
       clearWorld(world);
       const spanX = Math.min(4.6, Math.max(2.0, 3.4 * world.camera.aspect));
+      const pick = wanted.some((d) => d.drop);
       let maxZ = -Infinity;
       for (let i = 0; i < wanted.length; i++) {
         const dg = built.get(wanted[i].sides);
         if (!dg) continue;
-        const die = spawnDie(world.T, world, dg, wanted[i], i, wanted.length, spanX);
+        const die = spawnDie(world.T, world, dg, wanted[i], i, wanted.length, spanX, pick);
         maxZ = Math.max(maxZ, die.to.z);
         world.dice.push(die);
       }
       if (!world.dice.length) return;
-      if (want.who) {
+      const card: BoardCard | null = want.card ?? (want.who ? { name: want.who, title: '', expression: '', total: '' } : null);
+      if (card) {
         const T = world.T;
         const label = new T.Sprite(
-          new T.SpriteMaterial({ map: whoTexture(T, want.who), transparent: true, opacity: 0, depthWrite: false }),
+          new T.SpriteMaterial({ map: cardTexture(T, card), transparent: true, opacity: 0, depthWrite: false }),
         );
-        label.scale.set(world.dieSize * 3.4, world.dieSize * 0.85, 1);
+        label.scale.set(world.dieSize * 4.6, world.dieSize * 1.02, 1);
         label.position.set(0, world.dieSize * 0.35, maxZ + world.dieSize * 2.6);
         world.scene.add(label);
         world.label = label;

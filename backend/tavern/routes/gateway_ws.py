@@ -90,7 +90,40 @@ async def _board_view(conn: Connection, d: dict) -> None:
     members = await run_in_threadpool(_member_ids, server_id)
     if conn.user_id not in members:
         return
-    board.set_viewing(server_id, conn.user_id, id(conn), bool(d.get("viewing")), members)
+    viewing = bool(d.get("viewing"))
+    board.set_viewing(server_id, conn.user_id, id(conn), viewing, members)
+    if viewing:
+        # Joiners get everyone else's pointer right away; after this they only
+        # hear about it when someone moves or switches tools.
+        snap = board.cursors(server_id)
+        others = [
+            {"user_id": u, "x": round(x, 1), "y": round(y, 1), "tool": t}
+            for u, (x, y, t) in snap.items()
+            if u != conn.user_id
+        ]
+        if others:
+            conn.send(json.dumps({"op": 0, "t": "BOARD_CURSORS", "d": {"server_id": server_id, "cursors": others}}))
+
+
+async def _board_cursor(conn: Connection, d: dict) -> None:
+    server_id = d.get("server_id")
+    x = d.get("x")
+    y = d.get("y")
+    tool = d.get("tool")
+    if not isinstance(server_id, int) or isinstance(x, bool) or isinstance(y, bool):
+        return
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return
+    if not isinstance(tool, str) or len(tool) > 24:
+        return
+    targets = board.set_cursor(server_id, conn.user_id, float(x), float(y), tool)
+    if not targets:
+        return
+    gateway.publish(
+        targets,
+        "BOARD_CURSOR",
+        {"server_id": server_id, "user_id": conn.user_id, "x": round(float(x), 1), "y": round(float(y), 1), "tool": tool},
+    )
 
 
 @router.websocket("/api/gateway")
@@ -152,6 +185,8 @@ async def gateway_socket(ws: WebSocket) -> None:
                 await _theater_seat(conn, d)
             elif op == 12:
                 await _board_view(conn, d)
+            elif op == 13:
+                await _board_cursor(conn, d)
     except WebSocketDisconnect:
         pass
     except Exception:

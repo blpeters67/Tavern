@@ -932,102 +932,73 @@ body.col-resizing * {
   position: relative;
 }
 
-.board-dice-tray {
+/* The same tray the message box opens, anchored to the dice tool: centered on
+   the button it belongs to (not the strip), floating over the map. */
+.board-dice-pop {
   position: absolute;
   top: calc(100% + 10px);
-  right: 0;
+  left: 50%;
   z-index: 40;
+  transform: translateX(-50%);
+}
+
+.board-dice-pop .dice-tray {
+  max-height: min(520px, calc(100vh - 160px));
+}
+
+/* ---------- Live pointers ---------- */
+
+.board-cursors {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.board-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-floating) 88%, transparent);
-  box-shadow: var(--shadow-high);
-  backdrop-filter: blur(6px);
+  align-items: flex-start;
+  gap: 1px;
+  color: var(--gold);
+  will-change: transform;
 }
 
-.board-dice-row {
-  display: grid;
-  grid-template-columns: repeat(3, 34px);
-  gap: 4px;
+.board-cursor > svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 55%));
 }
 
-.board-dice-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--interactive-normal);
-  cursor: pointer;
-}
-
-.board-dice-btn:hover:not(:disabled) {
-  background: var(--bg-mod-hover);
-  color: var(--interactive-hover);
-}
-
-.board-dice-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.board-dice-opts {
-  display: flex;
+.board-cursor-chip {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-.board-dice-label {
-  margin-right: 2px;
-  color: var(--text-muted);
+  margin-top: 13px;
+  margin-left: -4px;
+  padding: 2px 8px 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gold) 20%, rgb(8 9 12 / 88%));
   font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 35%);
+}
+
+.board-cursor-chip svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.9;
+}
+
+.board-cursor-chip b {
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.board-dice-step {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: var(--bg-mod-hover);
-  color: var(--interactive-normal);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.board-dice-step:hover:not(:disabled) {
-  color: var(--interactive-hover);
-}
-
-.board-dice-step:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.board-dice-num {
-  min-width: 20px;
-  text-align: center;
-  color: var(--text-normal);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.board-dice-quiet {
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 /* The board's own text channel, worn beside the title: its rolls post there. */

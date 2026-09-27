@@ -178,6 +178,33 @@ def run(log_path: Path, data_dir: Path) -> None:
     gw_c.send(12, {"server_id": sid, "viewing": False})
     gw_a.wait_for("BOARD_VIEWERS", lambda v: me_c["id"] not in v["user_ids"])
 
+    # --- live cursors: relayed to other viewers, dropped for outsiders, snapshot on join ----
+    me_a = gw_a.ready["user"]["id"]  # a plain id (the others hold the user dict)
+    gw_a.send(12, {"server_id": sid, "viewing": True})
+    gw_a.wait_for("BOARD_VIEWERS", lambda v: me_a in v["user_ids"])
+    gw_c.send(12, {"server_id": sid, "viewing": True})
+    gw_a.wait_for("BOARD_VIEWERS", lambda v: me_c["id"] in v["user_ids"])
+    gw_c.send(13, {"server_id": sid, "x": 120.5, "y": 340.5, "tool": "pen"})
+    cur = gw_a.wait_for("BOARD_CURSOR", lambda v: v["user_id"] == me_c["id"])
+    assert cur["x"] == 120.5 and cur["y"] == 340.5 and cur["tool"] == "pen" and cur["server_id"] == sid
+    gw_b.send(13, {"server_id": sid, "x": 7.0, "y": 7.0, "tool": "rect"})  # b isn't viewing: dropped
+    gw_c.send(13, {"server_id": sid, "x": 200.5, "y": 100.5, "tool": "select"})
+    gw_a.wait_for("BOARD_CURSOR", lambda v: v["x"] == 200.5)
+    time.sleep(0.3)
+    assert not any(t == "BOARD_CURSOR" and d.get("x") == 7.0 for t, d in gw_a.events), "cursor from a non-viewer leaked"
+    gw_a.send(13, {"server_id": sid, "x": 55.5, "y": 66.5, "tool": "text"})
+    gw_c.wait_for("BOARD_CURSOR", lambda v: v["user_id"] == me_a and v["tool"] == "text")
+    # A viewer leaving drops their pointer: the next joiner's snapshot only has the rest.
+    gw_c.send(12, {"server_id": sid, "viewing": False})
+    gw_a.wait_for("BOARD_VIEWERS", lambda v: me_c["id"] not in v["user_ids"])
+    gw_b.send(12, {"server_id": sid, "viewing": True})
+    snap = gw_b.wait_for("BOARD_CURSORS", lambda v: any(c["user_id"] == me_a for c in v["cursors"]))
+    assert snap["server_id"] == sid and all(c["user_id"] != me_c["id"] for c in snap["cursors"])
+    gw_a.send(12, {"server_id": sid, "viewing": False})
+    gw_b.send(12, {"server_id": sid, "viewing": False})
+    gw_a.wait_for("BOARD_VIEWERS", lambda v: not v["user_ids"])
+    print("cursors ok (relay, viewer-only, snapshot, cleanup)")
+
     # --- a fresh connection's READY carries the whole board ----
     gw_b2 = Gateway(b)
     srv = next(s for s in gw_b2.ready["servers"] if s["id"] == sid)

@@ -984,6 +984,16 @@ const handlers: Record<string, Handler> = {
       return sb ? { board: { ...s.board, [d.server_id]: { ...sb, viewers: d.user_ids } } } : {};
     });
   },
+
+  // Live pointers: nothing to store — the board renders them straight from the
+  // event (they move too often to live in React state).
+  BOARD_CURSOR(d: { server_id: number; user_id: number; x: number; y: number; tool: string }) {
+    emit('board-cursor', d);
+  },
+
+  BOARD_CURSORS(d: { server_id: number; cursors: { user_id: number; x: number; y: number; tool: string }[] }) {
+    emit('board-cursors', d);
+  },
 };
 
 export function dispatch(t: string, d: unknown) {

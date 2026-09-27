@@ -9,6 +9,8 @@ the theater keeps track of its audience.
 from __future__ import annotations
 
 import logging
+import math
+import time
 from typing import Any
 
 from sqlalchemy import select
@@ -151,6 +153,34 @@ class BoardManager:
     def __init__(self) -> None:
         self._viewers: dict[int, dict[int, set[int]]] = {}  # server -> user -> conn ids (loop only)
         self._snap: dict[int, tuple[int, ...]] = {}  # safe to read from any thread
+        # Where each viewer's pointer last was (board units) + which tool they hold.
+        self._cursors: dict[int, dict[int, tuple[float, float, str, float]]] = {}
+
+    def set_cursor(self, server_id: int, user_id: int, x: float, y: float, tool: str) -> list[int] | None:
+        """Remember a viewer's pointer; returns who to relay it to, or None when
+        the update is not worth sending (not viewing, throttled, junk numbers)."""
+        users = self._viewers.get(server_id, {})
+        if user_id not in users:
+            return None
+        if not (math.isfinite(x) and math.isfinite(y)) or abs(x) > 100_000 or abs(y) > 100_000:
+            return None
+        now = time.monotonic()
+        prev = self._cursors.setdefault(server_id, {}).get(user_id)
+        if prev and now - prev[3] < 0.04 and prev[2] == tool:
+            return None
+        self._cursors[server_id][user_id] = (x, y, tool, now)
+        return [u for u in users if u != user_id]
+
+    def cursors(self, server_id: int) -> dict[int, tuple[float, float, str]]:
+        """The last pointer each viewer had on this server's board."""
+        return {u: (x, y, t) for u, (x, y, t, _) in self._cursors.get(server_id, {}).items()}
+
+    def _forget_cursor(self, server_id: int, user_id: int) -> None:
+        cursors = self._cursors.get(server_id)
+        if cursors is not None:
+            cursors.pop(user_id, None)
+            if not cursors:
+                self._cursors.pop(server_id, None)
 
     def viewers(self, server_id: int) -> list[int]:
         return list(self._snap.get(server_id, ()))
@@ -169,6 +199,7 @@ class BoardManager:
                 conns.discard(conn_id)
                 if not conns:
                     users.pop(user_id, None)
+                    self._forget_cursor(server_id, user_id)
         self._resnap(server_id)
         if set(users) != before:
             gateway.publish(member_ids, "BOARD_VIEWERS", {"server_id": server_id, "user_ids": self.viewers(server_id)})
@@ -182,6 +213,7 @@ class BoardManager:
                 conns.discard(conn_id)
                 if not conns:
                     users.pop(user_id, None)
+                    self._forget_cursor(server_id, user_id)
                     changed.append(server_id)
                 self._resnap(server_id)
         return changed

@@ -10,9 +10,11 @@ import { characterAvatar, userAvatar } from '../lib/avatars';
 import { on } from '../lib/events';
 import { useCollapsed } from '../lib/panelPrefs';
 import { closeBoard, openBoard, openContextMenu, openModal, openSheet } from '../store/actions';
-import { canControlBoard, displayName, myCharacters } from '../store/selectors';
+import { canControlBoard, displayName, myCharacters, narratorName } from '../store/selectors';
 import { getState, useStore } from '../store/store';
-import { claimRollAnimation, roll as requestRoll } from '../lib/rolls';
+import { load, save } from '../lib/storage';
+import DiceTray from './DiceTray';
+import { claimRollAnimation } from '../lib/rolls';
 import type { Board, BoardDrawing, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
 import { MessageType, ChannelType } from '../store/types';
 import {
@@ -24,12 +26,6 @@ import {
   mdiClose,
   mdiCursorDefault,
   mdiDeleteSweepOutline,
-  mdiDiceD10,
-  mdiDiceD12,
-  mdiDiceD20,
-  mdiDiceD4,
-  mdiDiceD6,
-  mdiDiceD8,
   mdiDiceMultiple,
   mdiDraw,
   mdiCircleOutline,
@@ -37,6 +33,7 @@ import {
   mdiImage,
   mdiMagnet,
   mdiMinus,
+  mdiMouseVariant,
   mdiPencil,
   mdiPlus,
   mdiPound,
@@ -84,8 +81,6 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 const DRAW_COLORS = ['#e5484d', '#f2f4f8', '#e0b252', '#83c5ff', '#3dd68c'];
 
 /** The dice the board can roll, with the matching icons. */
-const DICE_SIDES = [4, 6, 8, 10, 12, 20] as const;
-const DICE_ICONS: Record<number, string> = { 4: mdiDiceD4, 6: mdiDiceD6, 8: mdiDiceD8, 10: mdiDiceD10, 12: mdiDiceD12, 20: mdiDiceD20 };
 
 // ---------------------------------------------------------------------------
 // The card in the right-hand panel
@@ -584,6 +579,20 @@ const TOOL_KEYS: Record<string, 'select' | DrawKind | 'text' | 'ruler'> = {
   s: 'rect',
   t: 'text',
 };
+
+/** The icon a remote cursor's tag wears for each tool (matches the toolbar). */
+const CURSOR_ICONS: Record<string, string> = {
+  select: mdiCursorDefault,
+  pen: mdiDraw,
+  arrow: mdiArrowTopRight,
+  line: mdiVectorLine,
+  rect: mdiRectangleOutline,
+  ellipse: mdiCircleOutline,
+  text: mdiFormatText,
+  ruler: mdiRuler,
+};
+
+type CursorEntry = { el: HTMLDivElement; path: SVGPathElement; x: number; y: number; tool: string };
 type Shape = { kind: BoardDrawing['kind']; color: string; width: number; data: BoardDrawing['data'] };
 type Pt = { x: number; y: number };
 type Draft = { kind: DrawKind; from: Pt; to: Pt; points: [number, number][] };
@@ -674,6 +683,8 @@ function BoardTopBar({
   uploadPct,
   onPickBackground,
   canControl,
+  cursorsOn,
+  onCursorsToggle,
   tools,
 }: {
   serverId: number;
@@ -686,6 +697,8 @@ function BoardTopBar({
   uploadPct: number | null;
   onPickBackground: () => void;
   canControl: boolean;
+  cursorsOn: boolean;
+  onCursorsToggle: () => void;
   tools: ReactNode;
 }) {
   const users = useStore((s) => s.users);
@@ -891,6 +904,15 @@ function BoardTopBar({
             <Icon path={mdiMagnet} size={17} />
           </button>
         )}
+        <button
+          className={`board-icon-btn ${cursorsOn ? 'on' : ''}`}
+          aria-label="Show other players’ cursors"
+          aria-pressed={cursorsOn}
+          onClick={onCursorsToggle}
+          {...tip(cursorsOn ? 'Hide other players’ cursors' : 'Show other players’ cursors — they see yours too', 'bottom')}
+        >
+          <Icon path={mdiMouseVariant} size={17} />
+        </button>
       </div>
       <div className="board-viewers">
         {sb.viewers.map((id) => (users[id] ? <Avatar key={id} src={userAvatar(users[id])} size={22} {...tip(`${displayName(users[id])} has the board open`, 'bottom')} /> : null))}
@@ -960,8 +982,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const [tool, setTool] = useState<'select' | DrawKind | 'text' | 'ruler'>('select');
   const [color, setColor] = useState(DRAW_COLORS[0]);
   const [diceOpen, setDiceOpen] = useState(false);
-  const [diceCount, setDiceCount] = useState(1);
-  const [diceMod, setDiceMod] = useState(0);
+  const [cursorsOn, setCursorsOn] = useState(() => load('boardCursors', true));
   const [diceRoll, setDiceRoll] = useState<BoardRoll | null>(null);
   const diceSeq = useRef(0);
   const drawRef = useRef<Draft | null>(null);
@@ -1032,19 +1053,30 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           for (const r of term.rolls) dice.push({ sides: term.sides, value: r.v, drop: !!r.drop });
         }
       }
-      if (dice.length) setDiceRoll({ id: ++diceSeq.current, dice, who: m.author ? displayName(m.author) : undefined });
+      if (!dice.length) return;
+      const first = roll.parts[0];
+      const ch = m.character ?? null;
+      const st = getState();
+      const name = ch ? ch.name : m.meta?.narrator ? narratorName(st, serverId) : m.author ? displayName(m.author) : null;
+      setDiceRoll({
+        id: ++diceSeq.current,
+        dice,
+        who: m.author ? displayName(m.author) : undefined,
+        card: name
+          ? {
+              name,
+              title: roll.title || first?.expression || '',
+              expression: first?.expression ?? '',
+              total: first ? String(first.total) : '',
+              avatar: ch ? characterAvatar(ch) : m.author ? userAvatar(m.author) : null,
+              color: ch?.color ?? null,
+              adv: roll.adv ?? null,
+              outcome: roll.outcome ?? null,
+            }
+          : undefined,
+      });
     });
   }, [diceChannel]);
-
-  /** Roll from the tray: a plain NdX±M that lands in the board's channel. */
-  const rollDice = useCallback(
-    (sides: number) => {
-      if (diceChannel === null) return;
-      const expression = `${diceCount}d${sides}${diceMod ? (diceMod > 0 ? `+${diceMod}` : `${diceMod}`) : ''}`;
-      void requestRoll(diceChannel, { kind: 'custom', expression });
-    },
-    [diceChannel, diceCount, diceMod],
-  );
 
   const fit = useCallback(() => {
     const el = stageRef.current;
@@ -1287,6 +1319,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
     setDraft({ ...drawRef.current, points: [...drawRef.current.points] });
   };
   const onStagePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    sendCursor(e.clientX, e.clientY);
     const d = drawRef.current;
     if (d) {
       const w = toWorld(e.clientX, e.clientY);
@@ -1486,6 +1519,10 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
       if (e.key === 'Escape' && !s.modals.length && !s.sheetView && !s.contextMenu) {
+        if (diceOpen) {
+          setDiceOpen(false);
+          return;
+        }
         if (ruler) {
           setRuler(null);
           return;
@@ -1530,7 +1567,131 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', restoreTool);
     };
-  }, [ruler, undo, redo, tool, pickTool]);
+  }, [ruler, undo, redo, tool, pickTool, diceOpen]);
+
+  // --- live pointers: where everyone else's mouse is and which tool they hold ---
+  const cursorsOnRef = useRef(cursorsOn);
+  cursorsOnRef.current = cursorsOn;
+  const cursorLayer = useRef<HTMLDivElement | null>(null);
+  const cursorMap = useRef(new Map<number, CursorEntry>());
+  const lastCursor = useRef({ at: 0, cx: 0, cy: 0 });
+  const toolRef = useRef(tool);
+
+  /** Screen spot for a pointer at board coordinates (they move with pan/zoom). */
+  const placeCursor = useCallback((c: { el: HTMLDivElement; x: number; y: number }) => {
+    const v = viewRef.current;
+    c.el.style.transform = `translate3d(${(v.x + c.x * v.z).toFixed(1)}px, ${(v.y + c.y * v.z).toFixed(1)}px, 0)`;
+  }, []);
+
+  const applyCursor = useCallback(
+    (id: number, x: number, y: number, tool: string) => {
+      const me = getState().me;
+      const layer = cursorLayer.current;
+      if (!layer || (me && id === me.id)) return;
+      let c = cursorMap.current.get(id);
+      if (!c) {
+        const el = document.createElement('div');
+        el.className = 'board-cursor';
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        arrow.setAttribute('viewBox', '0 0 24 24');
+        const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrowPath.setAttribute('d', mdiCursorDefault);
+        arrow.appendChild(arrowPath);
+        const chip = document.createElement('span');
+        chip.className = 'board-cursor-chip';
+        const ico = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        ico.setAttribute('viewBox', '0 0 24 24');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', CURSOR_ICONS[tool] ?? mdiCursorDefault);
+        ico.appendChild(path);
+        const label = document.createElement('b');
+        const user = getState().users[id];
+        label.textContent = user ? displayName(user) : 'Someone';
+        chip.append(ico, label);
+        el.append(arrow, chip);
+        layer.appendChild(el);
+        c = { el, path, x, y, tool };
+        cursorMap.current.set(id, c);
+      } else if (c.tool !== tool) {
+        c.tool = tool;
+        c.path.setAttribute('d', CURSOR_ICONS[tool] ?? mdiCursorDefault);
+      }
+      c.x = x;
+      c.y = y;
+      placeCursor(c);
+    },
+    [placeCursor],
+  );
+
+  useEffect(
+    () =>
+      on('board-cursor', (d: { server_id: number; user_id: number; x: number; y: number; tool: string }) => {
+        if (!cursorsOnRef.current || d.server_id !== serverId) return;
+        applyCursor(d.user_id, d.x, d.y, d.tool);
+      }),
+    [serverId, applyCursor],
+  );
+  useEffect(
+    () =>
+      on('board-cursors', (d: { server_id: number; cursors: { user_id: number; x: number; y: number; tool: string }[] }) => {
+        if (!cursorsOnRef.current || d.server_id !== serverId) return;
+        for (const c of d.cursors) applyCursor(c.user_id, c.x, c.y, c.tool);
+      }),
+    [serverId, applyCursor],
+  );
+
+  // Pan and zoom carry the pointers with the map.
+  useEffect(() => {
+    for (const c of cursorMap.current.values()) placeCursor(c);
+  }, [view, placeCursor]);
+
+  // Someone closed the board: their pointer goes with them.
+  const boardViewers = sb?.viewers;
+  useEffect(() => {
+    if (!boardViewers) return;
+    const live = new Set(boardViewers);
+    for (const [id, c] of cursorMap.current) {
+      if (!live.has(id)) {
+        c.el.remove();
+        cursorMap.current.delete(id);
+      }
+    }
+  }, [boardViewers]);
+
+  // Toggled off: show nothing, and stop sharing mine.
+  useEffect(() => {
+    if (cursorsOn) return;
+    for (const c of cursorMap.current.values()) c.el.remove();
+    cursorMap.current.clear();
+  }, [cursorsOn]);
+
+  const toggleCursors = () => {
+    setCursorsOn((v) => {
+      save('boardCursors', !v);
+      return !v;
+    });
+  };
+
+  /** Send my pointer to the board (throttled); the server drops it when nobody
+   *  else has the board open. */
+  const sendCursor = useCallback(
+    (cx: number, cy: number, force = false) => {
+      if (!cursorsOnRef.current) return;
+      const now = performance.now();
+      if (!force && now - lastCursor.current.at < 70) return;
+      lastCursor.current = { at: now, cx, cy };
+      const w = toWorld(cx, cy);
+      gateway.send(13, { server_id: serverId, x: Math.round(w.x * 10) / 10, y: Math.round(w.y * 10) / 10, tool: toolRef.current });
+    },
+    [serverId, toWorld],
+  );
+
+  // Switching tools tells the others what I'm holding now.
+  useEffect(() => {
+    toolRef.current = tool;
+    const last = lastCursor.current;
+    if (last.at && cursorsOnRef.current) sendCursor(last.cx, last.cy, true);
+  }, [tool, sendCursor]);
 
   if (!sb) return <div className="board-room" />;
   if (!board) {
@@ -1565,9 +1726,11 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           uploadPct={uploadPct}
           onPickBackground={() => fileInput.current?.click()}
           canControl={canControl}
+          cursorsOn={cursorsOn}
+          onCursorsToggle={toggleCursors}
           tools={
             <>
-              <button className={`board-tool ${tool === 'select' ? 'active' : ''}`} aria-label="Select" onClick={() => pickTool('select')} {...tip('Select — drag the board to pan, drag a token to move it (middle-drag always pans)', 'bottom')}>
+              <button className={`board-tool ${tool === 'select' ? 'active' : ''}`} aria-label="Select" onClick={() => pickTool('select')} {...tip('Select — drag the board to pan, drag a token to move it (hold Space, or middle-drag, to pan with any tool)', 'bottom')}>
                 <Icon path={mdiCursorDefault} size={20} />
               </button>
               {canControl && (
@@ -1586,25 +1749,25 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 </button>
               )}
               <span className="board-tool-sep" />
-              <button className={`board-tool ${tool === 'pen' ? 'active' : ''}`} aria-label="Draw freehand" onClick={() => pickTool('pen')} {...tip('Draw — drag to sketch on the map', 'bottom')}>
+              <button className={`board-tool ${tool === 'pen' ? 'active' : ''}`} aria-label="Draw freehand" onClick={() => pickTool('pen')} {...tip('Draw — drag to sketch on the map (P)', 'bottom')}>
                 <Icon path={mdiDraw} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'arrow' ? 'active' : ''}`} aria-label="Arrow" onClick={() => pickTool('arrow')} {...tip('Arrow — drag from where it starts to where it points', 'bottom')}>
+              <button className={`board-tool ${tool === 'arrow' ? 'active' : ''}`} aria-label="Arrow" onClick={() => pickTool('arrow')} {...tip('Arrow — drag from where it starts to where it points (A)', 'bottom')}>
                 <Icon path={mdiArrowTopRight} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'line' ? 'active' : ''}`} aria-label="Line" onClick={() => pickTool('line')} {...tip('Line — drag to draw a straight line', 'bottom')}>
+              <button className={`board-tool ${tool === 'line' ? 'active' : ''}`} aria-label="Line" onClick={() => pickTool('line')} {...tip('Line — drag to draw a straight line (L)', 'bottom')}>
                 <Icon path={mdiVectorLine} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'rect' ? 'active' : ''}`} aria-label="Rectangle" onClick={() => pickTool('rect')} {...tip('Rectangle — drag out a box (a wall, a zone, a room)', 'bottom')}>
+              <button className={`board-tool ${tool === 'rect' ? 'active' : ''}`} aria-label="Rectangle" onClick={() => pickTool('rect')} {...tip('Rectangle — drag out a box (a wall, a zone, a room) (S)', 'bottom')}>
                 <Icon path={mdiRectangleOutline} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'ellipse' ? 'active' : ''}`} aria-label="Circle or oval" onClick={() => pickTool('ellipse')} {...tip('Circle — drag out a circle (a spell area, a campfire)', 'bottom')}>
+              <button className={`board-tool ${tool === 'ellipse' ? 'active' : ''}`} aria-label="Circle or oval" onClick={() => pickTool('ellipse')} {...tip('Circle — drag out a circle (a spell area, a campfire) (C)', 'bottom')}>
                 <Icon path={mdiCircleOutline} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'text' ? 'active' : ''}`} aria-label="Text" onClick={() => pickTool('text')} {...tip('Text — click the map to write a label', 'bottom')}>
+              <button className={`board-tool ${tool === 'text' ? 'active' : ''}`} aria-label="Text" onClick={() => pickTool('text')} {...tip('Text — click the map to write a label (T)', 'bottom')}>
                 <Icon path={mdiFormatText} size={20} />
               </button>
-              <button className={`board-tool ${tool === 'ruler' ? 'active' : ''}`} aria-label="Ruler" onClick={() => pickTool('ruler')} {...tip('Ruler — drag to measure; the distance shows on the line', 'bottom')}>
+              <button className={`board-tool ${tool === 'ruler' ? 'active' : ''}`} aria-label="Ruler" onClick={() => pickTool('ruler')} {...tip('Ruler — drag to measure; the distance shows on the line (R)', 'bottom')}>
                 <Icon path={mdiRuler} size={20} />
               </button>
               <span className="board-tool-sep" />
@@ -1621,44 +1784,18 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
               )}
               <span className="board-tool-sep" />
               <div className="board-dice-wrap">
-                <button className={`board-tool ${diceOpen ? 'active' : ''}`} aria-label="Dice" onClick={() => setDiceOpen((v) => !v)} {...tip('Roll dice on the board', 'bottom')}>
+                <button
+                  className={`board-tool ${diceOpen ? 'active' : ''}`}
+                  aria-label="Dice"
+                  disabled={diceChannel === null}
+                  onClick={() => setDiceOpen((v) => !v)}
+                  {...tip(diceChannel === null ? 'Give this board a text channel to roll dice' : 'Roll dice — quick dice, sheet checks, advantage', 'bottom')}
+                >
                   <Icon path={mdiDiceMultiple} size={20} />
                 </button>
-                {diceOpen && (
-                  <div className="board-dice-tray">
-                    <div className="board-dice-row">
-                      {DICE_SIDES.map((s) => (
-                        <button
-                          key={s}
-                          className="board-dice-btn"
-                          aria-label={`Roll a d${s}`}
-                          disabled={!channel}
-                          onClick={() => rollDice(s)}
-                          {...tip(`Roll ${diceCount}d${s}${diceMod ? (diceMod > 0 ? `+${diceMod}` : diceMod) : ''}`, 'bottom')}
-                        >
-                          <Icon path={DICE_ICONS[s]} size={22} />
-                        </button>
-                      ))}
-                    </div>
-                    <div className="board-dice-opts">
-                      <span className="board-dice-label">Dice</span>
-                      <button className="board-dice-step" aria-label="Fewer dice" disabled={diceCount <= 1} onClick={() => setDiceCount((c) => Math.max(1, c - 1))}>
-                        −
-                      </button>
-                      <span className="board-dice-num">{diceCount}</span>
-                      <button className="board-dice-step" aria-label="More dice" disabled={diceCount >= 10} onClick={() => setDiceCount((c) => Math.min(10, c + 1))}>
-                        +
-                      </button>
-                      <span className="board-dice-label">Mod</span>
-                      <button className="board-dice-step" aria-label="Lower the modifier" disabled={diceMod <= -10} onClick={() => setDiceMod((m) => Math.max(-10, m - 1))}>
-                        −
-                      </button>
-                      <span className="board-dice-num">{diceMod > 0 ? `+${diceMod}` : diceMod}</span>
-                      <button className="board-dice-step" aria-label="Raise the modifier" disabled={diceMod >= 10} onClick={() => setDiceMod((m) => Math.min(10, m + 1))}>
-                        +
-                      </button>
-                    </div>
-                    {!channel && <span className="board-dice-quiet">Open a text channel to roll.</span>}
+                {diceOpen && diceChannel !== null && (
+                  <div className="board-dice-pop">
+                    <DiceTray channelId={diceChannel} onClose={() => setDiceOpen(false)} />
                   </div>
                 )}
               </div>
@@ -1731,6 +1868,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 {ruler && <RulerMark a={ruler.a} b={ruler.b} g={board.grid_size} />}
               </svg>
             </div>
+            <div className="board-cursors" ref={cursorLayer} aria-hidden="true" />
           </div>
           <BoardDiceOverlay roll={diceRoll} />
           <TokenTray serverId={serverId} board={board} at={centerPoint} />

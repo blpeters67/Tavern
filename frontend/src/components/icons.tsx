@@ -138,6 +138,7 @@ export {
   mdiMonitor,
   mdiMonitorOff,
   mdiMonitorShare,
+  mdiMouseVariant,
   mdiMovieOpen,
   mdiMovieOpenOutline,
   mdiMovieOpenPlay,
