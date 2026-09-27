@@ -491,7 +491,6 @@ interface Die {
   spinRate: number;
   settleQ: import('three').Quaternion;
   startQ: import('three').Quaternion;
-  spinAt: number;
   phase: 0 | 1 | 2;
   x: number;
   y: number;
@@ -626,7 +625,6 @@ function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: numb
     spinRate: 9 + Math.random() * 7,
     settleQ,
     startQ: new T.Quaternion(),
-    spinAt: -1,
     phase: 0,
     x: from.x,
     y: h0,
@@ -667,29 +665,32 @@ function tick(world: World) {
   const t = performance.now() - world.start;
   const size = world.dieSize;
   for (const d of world.dice) {
-    if (t < LAND_MS) {
-      const u = easeOutCubic(Math.min(1, t / 620));
-      d.x = d.from.x + (d.to.x - d.from.x) * u;
-      d.z = d.from.z + (d.to.z - d.from.z) * u;
-      d.y = heightAt(t, d.h0, size);
-    }
+    // Position is a pure function of time, clamped at the landing moment: a
+    // stalled frame still leaves the die at rest instead of frozen mid-air.
+    const tm = Math.min(t, LAND_MS);
+    const u = easeOutCubic(Math.min(1, tm / 620));
+    d.x = d.from.x + (d.to.x - d.from.x) * u;
+    d.z = d.from.z + (d.to.z - d.from.z) * u;
+    d.y = heightAt(tm, d.h0, size);
     if (t < ALIGN_START) {
       d.group.quaternion.setFromAxisAngle(d.spinAxis, d.spinRate * (t / 1000));
     } else {
       if (d.phase === 0) {
         d.phase = 1;
-        d.spinAt = t;
-        d.startQ.copy(d.group.quaternion);
+        // Anchor the landing slerp to the FIXED alignment start, not to
+        // whichever frame first noticed it: a delayed frame must not shift
+        // the alignment window past the idle stop.
+        d.startQ.setFromAxisAngle(d.spinAxis, d.spinRate * (ALIGN_START / 1000));
       }
       // The tumble turns into the landing pose while the die is still in the
       // air: the slerp eases out and lands on the value at touchdown, so the
       // die never swivels after coming to rest.
-      const u = Math.min(1, (t - d.spinAt) / ALIGN_MS);
-      d.group.quaternion.slerpQuaternions(d.startQ, d.settleQ, easeOutCubic(u));
-      if (u >= 1) d.phase = 2;
+      const ua = Math.min(1, (t - ALIGN_START) / ALIGN_MS);
+      d.group.quaternion.slerpQuaternions(d.startQ, d.settleQ, easeOutCubic(ua));
+      if (ua >= 1) d.phase = 2;
     }
     if (d.badge && d.phase === 2) {
-      const bu = Math.min(1, Math.max(0, (t - d.spinAt - ALIGN_MS) / 160));
+      const bu = Math.min(1, Math.max(0, (t - LAND_MS) / 160));
       d.badge.material.opacity = bu;
       const s = size * 0.6 * (0.7 + 0.3 * easeOutCubic(bu));
       d.badge.scale.set(s, s, 1);
@@ -727,7 +728,9 @@ function tick(world: World) {
   }
   // Settled dice would otherwise be redrawn the same way ~600 times while they
   // linger; draw the still frame once and wake up again when the fade is due.
-  if (t >= IDLE_AT) {
+  // Only once every die has finished settling: a stalled frame must never stop
+  // the loop with dice still mid-alignment.
+  if (t >= IDLE_AT && world.dice.every((d) => d.phase >= 2)) {
     world.raf = 0;
     if (!world.fadeTimer) {
       world.fadeTimer = window.setTimeout(() => {
