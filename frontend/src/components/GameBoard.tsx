@@ -12,8 +12,9 @@ import { useCollapsed } from '../lib/panelPrefs';
 import { closeBoard, openBoard, openContextMenu, openModal, openSheet } from '../store/actions';
 import { canControlBoard, displayName, myCharacters } from '../store/selectors';
 import { getState, useStore } from '../store/store';
+import { claimRollAnimation, roll as requestRoll } from '../lib/rolls';
 import type { Board, BoardDrawing, BoardToken, Channel, Character, Disposition, ServerBoard } from '../store/types';
-import { ChannelType } from '../store/types';
+import { ChannelType, MessageType } from '../store/types';
 import {
   Icon,
   mdiAccountPlus,
@@ -23,6 +24,13 @@ import {
   mdiClose,
   mdiCursorDefault,
   mdiDeleteSweepOutline,
+  mdiDiceD10,
+  mdiDiceD12,
+  mdiDiceD20,
+  mdiDiceD4,
+  mdiDiceD6,
+  mdiDiceD8,
+  mdiDiceMultiple,
   mdiDraw,
   mdiEllipseOutline,
   mdiFormatText,
@@ -42,6 +50,7 @@ import { MenuItem, Modal, tip } from './layers';
 import { toast } from './Toasts';
 import { Avatar, Button, Field, TextInput } from './ui';
 import ChatView from './ChatView';
+import { BoardDiceOverlay, type BoardRoll } from './BoardDice';
 
 const DEFAULT_W = 1600;
 const DEFAULT_H = 1200;
@@ -71,6 +80,10 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** What the drawing tools paint with; the first one is the default. */
 const DRAW_COLORS = ['#e5484d', '#f2f4f8', '#e0b252', '#83c5ff', '#3dd68c'];
+
+/** The dice the board can roll, with the matching icons. */
+const DICE_SIDES = [4, 6, 8, 10, 12, 20] as const;
+const DICE_ICONS: Record<number, string> = { 4: mdiDiceD4, 6: mdiDiceD6, 8: mdiDiceD8, 10: mdiDiceD10, 12: mdiDiceD12, 20: mdiDiceD20 };
 
 // ---------------------------------------------------------------------------
 // The card in the right-hand panel
@@ -570,16 +583,16 @@ function draftShape(d: Draft, color: string): Shape {
   return { kind: d.kind, color, width: 3, data: { from: [r1(d.from.x), r1(d.from.y)], to: [r1(d.to.x), r1(d.to.y)] } };
 }
 
-const DrawingShape = memo(function DrawingShape({ d, ghost }: { d: Shape; ghost?: boolean }) {
+const DrawingShape = memo(function DrawingShape({ d }: { d: Shape }) {
   const common = { stroke: d.color, strokeWidth: d.width, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   if (d.kind === 'pen') {
     const data = d.data as { points: [number, number][] };
-    return <polyline points={data.points.map((p) => p.join(',')).join(' ')} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+    return <polyline points={data.points.map((p) => p.join(',')).join(' ')} fill="none" {...common} />;
   }
   if (d.kind === 'text') {
     const data = d.data as { at: [number, number]; text: string; size: number };
     return (
-      <text x={data.at[0]} y={data.at[1]} fill={d.color} fontSize={data.size} opacity={ghost ? 0.85 : 1} style={{ paintOrder: 'stroke', stroke: 'rgba(10, 12, 16, 0.7)', strokeWidth: Math.max(2, data.size / 8) }}>
+      <text x={data.at[0]} y={data.at[1]} fill={d.color} fontSize={data.size} style={{ paintOrder: 'stroke', stroke: 'rgba(10, 12, 16, 0.7)', strokeWidth: Math.max(2, data.size / 8) }}>
         {data.text}
       </text>
     );
@@ -588,10 +601,10 @@ const DrawingShape = memo(function DrawingShape({ d, ghost }: { d: Shape; ghost?
   const [fx, fy] = data.from;
   const [tx, ty] = data.to;
   if (d.kind === 'rect') {
-    return <rect x={Math.min(fx, tx)} y={Math.min(fy, ty)} width={Math.abs(tx - fx)} height={Math.abs(ty - fy)} rx={2} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+    return <rect x={Math.min(fx, tx)} y={Math.min(fy, ty)} width={Math.abs(tx - fx)} height={Math.abs(ty - fy)} rx={2} fill="none" {...common} />;
   }
   if (d.kind === 'ellipse') {
-    return <ellipse cx={(fx + tx) / 2} cy={(fy + ty) / 2} rx={Math.abs(tx - fx) / 2} ry={Math.abs(ty - fy) / 2} fill="none" opacity={ghost ? 0.85 : 1} {...common} />;
+    return <ellipse cx={(fx + tx) / 2} cy={(fy + ty) / 2} rx={Math.abs(tx - fx) / 2} ry={Math.abs(ty - fy) / 2} fill="none" {...common} />;
   }
   // The arrow: a shaft plus a head that stops short of the tip.
   const len = Math.hypot(tx - fx, ty - fy) || 1;
@@ -604,7 +617,7 @@ const DrawingShape = memo(function DrawingShape({ d, ghost }: { d: Shape; ghost?
   const nx = -uy;
   const ny = ux;
   return (
-    <g opacity={ghost ? 0.85 : 1}>
+    <g>
       <line x1={fx} y1={fy} x2={tx - ux * head * 0.7} y2={ty - uy * head * 0.7} stroke={d.color} strokeWidth={d.width} strokeLinecap="round" />
       <polygon points={`${tx},${ty} ${bx + nx * spread},${by + ny * spread} ${bx - nx * spread},${by - ny * spread}`} fill={d.color} />
     </g>
@@ -866,6 +879,11 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
   const [dragPos, setDragPos] = useState<{ id: number; x: number; y: number; hold?: boolean; seq?: number } | null>(null);
   const [tool, setTool] = useState<'select' | DrawKind | 'text' | 'ruler'>('select');
   const [color, setColor] = useState(DRAW_COLORS[0]);
+  const [diceOpen, setDiceOpen] = useState(false);
+  const [diceCount, setDiceCount] = useState(1);
+  const [diceMod, setDiceMod] = useState(0);
+  const [diceRoll, setDiceRoll] = useState<BoardRoll | null>(null);
+  const diceSeq = useRef(0);
   const drawRef = useRef<Draft | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const rulerRef = useRef<{ a: Pt; b: Pt } | null>(null);
@@ -913,6 +931,38 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
       gateway.send(12, { server_id: serverId, viewing: false });
     };
   }, [serverId]);
+
+  // Every live roll in the open channel drops 3D dice on the board — rolls from
+  // the tray, from chat, and for everyone watching, since everyone plays the
+  // same message. The board claims the animation first, so the chat card lands
+  // straight onto its numbers instead of tumbling a second time.
+  const diceChannel = channel?.id ?? null;
+  useEffect(() => {
+    if (diceChannel === null) return;
+    return on('message-create', (m) => {
+      if (m.type !== MessageType.ROLL || m.channel_id !== diceChannel) return;
+      const roll = m.meta?.roll;
+      if (!roll || !claimRollAnimation(m.id)) return;
+      const dice: BoardRoll['dice'] = [];
+      for (const part of roll.parts) {
+        for (const term of part.terms) {
+          if (term.kind !== 'dice') continue;
+          for (const r of term.rolls) dice.push({ sides: term.sides, value: r.v, drop: !!r.drop });
+        }
+      }
+      if (dice.length) setDiceRoll({ id: ++diceSeq.current, dice });
+    });
+  }, [diceChannel]);
+
+  /** Roll from the tray: a plain NdX±M that lands in the open channel's chat. */
+  const rollDice = useCallback(
+    (sides: number) => {
+      if (!channel) return;
+      const expression = `${diceCount}d${sides}${diceMod ? (diceMod > 0 ? `+${diceMod}` : `${diceMod}`) : ''}`;
+      void requestRoll(channel.id, { kind: 'custom', expression });
+    },
+    [channel, diceCount, diceMod],
+  );
 
   const fit = useCallback(() => {
     const el = stageRef.current;
@@ -1458,7 +1508,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 );
               })}
               <svg className="board-draw-layer board-draw-top" viewBox={`0 0 ${world.w} ${world.h}`} width={world.w} height={world.h} aria-hidden="true">
-                {draft && <DrawingShape d={draftShape(draft, color)} ghost />}
+                {draft && <DrawingShape d={draftShape(draft, color)} />}
                 {ruler && <RulerMark a={ruler.a} b={ruler.b} g={board.grid_size} />}
               </svg>
             </div>
@@ -1513,6 +1563,49 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 <Icon path={mdiDeleteSweepOutline} size={20} />
               </button>
             )}
+            <span className="board-tool-sep" />
+            <div className="board-dice-wrap">
+              <button className={`board-tool ${diceOpen ? 'active' : ''}`} aria-label="Dice" onClick={() => setDiceOpen((v) => !v)} {...tip('Roll dice on the board')}>
+                <Icon path={mdiDiceMultiple} size={20} />
+              </button>
+              {diceOpen && (
+                <div className="board-dice-tray">
+                  <div className="board-dice-row">
+                    {DICE_SIDES.map((s) => (
+                      <button
+                        key={s}
+                        className="board-dice-btn"
+                        aria-label={`Roll a d${s}`}
+                        disabled={!channel}
+                        onClick={() => rollDice(s)}
+                        {...tip(`Roll ${diceCount}d${s}${diceMod ? (diceMod > 0 ? `+${diceMod}` : diceMod) : ''}`)}
+                      >
+                        <Icon path={DICE_ICONS[s]} size={22} />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="board-dice-opts">
+                    <span className="board-dice-label">Dice</span>
+                    <button className="board-dice-step" aria-label="Fewer dice" disabled={diceCount <= 1} onClick={() => setDiceCount((c) => Math.max(1, c - 1))}>
+                      −
+                    </button>
+                    <span className="board-dice-num">{diceCount}</span>
+                    <button className="board-dice-step" aria-label="More dice" disabled={diceCount >= 10} onClick={() => setDiceCount((c) => Math.min(10, c + 1))}>
+                      +
+                    </button>
+                    <span className="board-dice-label">Mod</span>
+                    <button className="board-dice-step" aria-label="Lower the modifier" disabled={diceMod <= -10} onClick={() => setDiceMod((m) => Math.max(-10, m - 1))}>
+                      −
+                    </button>
+                    <span className="board-dice-num">{diceMod > 0 ? `+${diceMod}` : diceMod}</span>
+                    <button className="board-dice-step" aria-label="Raise the modifier" disabled={diceMod >= 10} onClick={() => setDiceMod((m) => Math.min(10, m + 1))}>
+                      +
+                    </button>
+                  </div>
+                  {!channel && <span className="board-dice-quiet">Open a text channel to roll.</span>}
+                </div>
+              )}
+            </div>
             {tool !== 'select' && tool !== 'ruler' && (
               <div className="board-palette">
                 {DRAW_COLORS.map((c) => (
@@ -1521,6 +1614,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
               </div>
             )}
           </div>
+          <BoardDiceOverlay roll={diceRoll} />
           <TokenTray serverId={serverId} board={board} at={centerPoint} />
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => onPickFile(e.target.files)} />
         </div>

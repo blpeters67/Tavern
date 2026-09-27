@@ -1,7 +1,7 @@
 {
   "name": "tavern-frontend",
   "private": true,
-  "version": "2.10.1",
+  "version": "2.11.0",
   "type": "module",
   "scripts": {
     "emoji": "node scripts/build-emoji.mjs",
@@ -31,12 +31,14 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.0",
+    "three": "^0.186.1",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@twemoji/svg": "^15.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^5.0.0",
     "emojibase-data": "^17.0.0",
     "typescript": "~5.9.3",
