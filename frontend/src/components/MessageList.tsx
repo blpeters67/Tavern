@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { userAvatar } from '../lib/avatars';
 import { dayKey, formatLongDate } from '../lib/format';
 import { P } from '../lib/permissions';
@@ -79,6 +79,10 @@ export default function MessageList({ channel }: { channel: Channel }) {
   const snapshot = useRef({ height: 0, firstId: 0 });
   const anchors = useRef<Anchor[]>([]);
   const [highlight, setHighlight] = useState<number | null>(null);
+  // While you're being shown a roll (a jump just landed on one), hide-rolls
+  // lets its row through; it slips back under the filter once the moment passes.
+  const [revealedRoll, setRevealedRoll] = useState<number | null>(null);
+  const revealTimer = useRef(0);
   const [newSince, setNewSince] = useState<number | null>(() => {
     const s = getState();
     const rs = s.readStates[channel.id];
@@ -106,6 +110,13 @@ export default function MessageList({ channel }: { channel: Channel }) {
     setReadingBack(channel.id, false);
     return () => setReadingBack(channel.id, false);
   }, [channel.id]);
+
+  useEffect(
+    () => () => {
+      if (revealTimer.current) window.clearTimeout(revealTimer.current);
+    },
+    [],
+  );
 
   // Clear the NEW divider once you send something.
   useEffect(() => {
@@ -192,6 +203,11 @@ export default function MessageList({ channel }: { channel: Channel }) {
     snapshot.current.height = scroller.current!.scrollHeight;
     captureAnchor();
     setHighlight(jump.messageId);
+    // The jump clears in this commit; a hidden roll would leave with it. Hold
+    // the row visible as long as it pulses, then let the filter have it back.
+    setRevealedRoll(jump.messageId);
+    if (revealTimer.current) window.clearTimeout(revealTimer.current);
+    revealTimer.current = window.setTimeout(() => setRevealedRoll(null), 2400);
     setState({ jump: null });
     const t = window.setTimeout(() => setHighlight(null), 2000);
     return () => window.clearTimeout(t);
@@ -245,6 +261,42 @@ export default function MessageList({ channel }: { channel: Channel }) {
   };
 
   const hideRolls = useStore((s) => s.hideRolls);
+  // A roll you just jumped to (from a pin or a reply) keeps its row while the
+  // jump is pending and briefly after, so arriving on it actually shows it.
+  const revealId = jump?.messageId ?? revealedRoll;
+
+  /**
+   * Older pages normally arrive on scroll — but with rolls hidden the loaded
+   * rows can be too few to scroll at all, stranding everything above them.
+   * While that's the case, keep pulling the previous page in (until the list
+   * scrolls or the channel runs out). A round that added nothing backs off,
+   * so a failing fetch can't spin.
+   */
+  const fillCheck = useRef({ at: 0, len: -1 });
+  const checkFill = useCallback(() => {
+    const el = scroller.current;
+    const c = getState().messages[channel.id];
+    if (!el || !c || !c.loaded || c.loadingBefore || !c.hasMoreBefore) return;
+    if (el.scrollHeight - el.clientHeight > 4) return; // it scrolls: onScroll's job
+    const now = Date.now();
+    if (c.list.length === fillCheck.current.len && now - fillCheck.current.at < 2500) return;
+    fillCheck.current = { at: now, len: c.list.length };
+    void loadBefore(channel.id);
+  }, [channel.id]);
+
+  useEffect(() => {
+    checkFill();
+  }, [checkFill, list, hideRolls, loaded, cache?.hasMoreBefore, cache?.loadingBefore]);
+
+  // The column can also grow taller (a splitter drag, the board opening) and
+  // leave the same short list, so watch the box itself, not just the messages.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => checkFill());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [checkFill]);
 
   const rows = useMemo(() => {
     const out: ReactNode[] = [];
@@ -253,8 +305,9 @@ export default function MessageList({ channel }: { channel: Channel }) {
     let newShown = false;
     for (const m of list) {
       // Rolls the reader hid leave no trace at all: no row, no divider and
-      // no grouping break, so the rest of the conversation reads normally.
-      if (hideRolls && m.type === MessageType.ROLL) continue;
+      // no grouping break, so the rest of the conversation reads normally —
+      // except the one a jump is carrying you to (revealId).
+      if (hideRolls && m.type === MessageType.ROLL && m.id !== revealId) continue;
       const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
       const isNew = !newShown && newSince !== null && m.id > newSince && m.author_id !== meId;
       if (isNew) newShown = true;
@@ -270,7 +323,7 @@ export default function MessageList({ channel }: { channel: Channel }) {
       prev = m;
     }
     return out;
-  }, [list, newSince, meId, highlight, hideRolls]);
+  }, [list, newSince, meId, highlight, hideRolls, revealId]);
 
   const pendingRows = useMemo(() => {
     if (!pending?.length || cache?.hasMoreAfter) return null;
