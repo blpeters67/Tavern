@@ -114,9 +114,9 @@ The card under the theater. It's a shared battle map: everyone looks at the same
 - **Background:** upload a picture (PNG or JPG, 64 MB by default) and it becomes the map. The grid sits on top, with a square size you pick.
 - **Tokens:** the Dungeon Master places monsters, NPCs and markers from **Place Token** (name, ring colour, optional hit points) and can drop any character onto the board. Players get a button that puts their own character on too.
 - **Moving around:** drag a token where you want it and it snaps to the square; drag the map to pan, scroll to zoom, **Fit** brings it back into view; the grid toggle hides the lines. Clicking a character's token opens their sheet.
-- **Drawing on the map:** a pen, arrows, rectangles, ovals and text labels in five colours, with **Undo** (Ctrl+Z) and **Redo** (Ctrl+Shift+Z) for your own strokes. The ruler measures in squares and feet while you drag it (Esc hides it), and whoever runs the game can clear every drawing at once.
+- **Drawing on the map:** a pen, arrows, straight lines, rectangles, circles and text labels in five colours, with **Undo** (Ctrl+Z) and **Redo** (Ctrl+Shift+Z) for your own strokes. The ruler measures in squares and feet while you drag it (Esc hides it), and whoever runs the game can clear every drawing at once.
 - **Rings and hit points:** green for allies, grey for neutrals, red for enemies (right-click a token to change its ring). A free token carries its own hit-point bar; a character's follows that character's sheet.
-- **Dice on the board:** while the board is open, every roll also lands on it as 3D dice — the same number the chat card shows, so nobody misreads a roll. They tumble in, settle, and clear themselves after a few seconds. d4 through d20.
+- **Dice on the board:** while the board is open, every roll also lands on it as 3D dice — the same numbers the chat card shows, so nobody misreads a roll. Each die carries its number on its own faces, the roller's name sits with them, and they tumble in, settle on the rolled value and clear themselves after a few seconds. d4 through d20.
 - The avatars in the board's top bar (and on its card) show who has the board open.
 
 ## Characters, sheets and dice
@@ -229,10 +229,6 @@ Working on the code? Read `handoff.txt` next. It explains how Tavern works insid
 
 - Run exactly one Tavern process. Live updates, voice rooms, the jukebox and theater clocks and rate limits are held in memory, so don't add workers.
 - Not in this version: a light theme and an initiative tracker.
-
-## Credits
-
-- **D6 dice mesh:** the die rolled on the game board is the free **D6** from [JDSherbert's 3D Dice Pack](https://jdsherbert.itch.io/3d-dice-pack) (©2023 Joshua "JDSherbert" Herbert), licensed free for commercial and non-commercial projects with credit to the author. The pack's own albedo art doesn't line up with the mesh's UV islands, so the pip texture that ships here is drawn by Tavern; the other die shapes (d4, d8, d10, d12, d20) are generated in code.
 
 ## License
 

@@ -1,13 +1,14 @@
 /** The 3D dice that drop onto the game board when somebody rolls. The result
  * always comes from the server (the roll was already made — see lib/rolls), so
- * this layer only has to make the dice agree with it: they tumble in, settle on
- * that value, and linger for a moment. Everyone at the table sees the same
- * numbers because everyone plays the same roll message.
+ * this layer only has to make the dice agree with it: they tumble in, settle
+ * with the rolled number facing up and the roller's name under them. Everyone
+ * at the table sees the same numbers because everyone plays the same roll
+ * message.
  *
- * three.js and the D6 mesh load lazily on the first roll — the board costs
- * nothing until dice are actually used. The D6 mesh and its textures are
- * JDSherbert's (free pack, see public/dice/CREDIT.txt); the other dice are
- * drawn procedurally with the value shown on a badge. */
+ * Every die is generated here — geometry and textures (pips for the cube,
+ * numbers for the rest). Nothing is fetched, so the layer costs nothing until
+ * dice are actually used, and there are no third-party assets to credit.
+ */
 import { useEffect, useRef } from 'react';
 
 /** One die to drop: its shape and the value it must land on. */
@@ -21,6 +22,8 @@ export interface BoardDie {
 export interface BoardRoll {
   id: number;
   dice: BoardDie[];
+  /** Who rolled, shown under the dice. */
+  who?: string;
 }
 
 type Three = typeof import('three');
@@ -28,13 +31,19 @@ type Geo = import('three').BufferGeometry;
 type Mat = import('three').MeshStandardMaterial;
 /** Any three material that fades: used for badges and the soft shadows. */
 type AnyMat = import('three').Material & { opacity: number };
-type MeshO = import('three').Mesh;
 type Obj3D = import('three').Object3D;
 type SpriteO = import('three').Sprite;
+type Vec3 = import('three').Vector3;
+
+/** The shapes the board can drop. Anything else still posts to chat. */
+const SHAPES = [4, 6, 8, 10, 12, 20] as const;
 
 /** Anything past this many dice still rolls; the extras just skip the drop. */
 const MAX_DICE = 12;
-const DIE_SIZE = 0.62;
+/** The die's size on screen, in CSS pixels (the world size follows the stage). */
+const DIE_PX = 82;
+/** Roughly the visible width of the board's floor at the camera distance. */
+const VIS_W = 3.27;
 /** Tumble until this long after the roll, then settle onto the value. */
 const SETTLE_MS = 1250;
 const SETTLE_LERP_MS = 380;
@@ -42,21 +51,8 @@ const SETTLE_LERP_MS = 380;
 const STAY_MS = 12000;
 const FADE_MS = 750;
 
-/**
- * Which local axis of the D6 mesh shows each value. Calibrated against the
- * shipped mesh by rendering each axis face-on and counting the pips on it:
- * +X=1, +Y=2, -Z=3, +Z=4, -Y=5, -X=6 (opposites sum to 7, as a real die).
- * Settling aims this axis at +Y (up), so the top face the player reads is the
- * rolled value.
- */
-const D6_UP: Record<number, [number, number, number]> = {
-  1: [1, 0, 0],
-  2: [0, 1, 0],
-  3: [0, 0, -1],
-  4: [0, 0, 1],
-  5: [0, -1, 0],
-  6: [-1, 0, 0],
-};
+const BASE = '#f2f3f5';
+const INK = '#20242b';
 
 // ---------------------------------------------------------------------------
 // Shared resources (module scope: they survive board remounts)
@@ -68,86 +64,67 @@ function loadThree(): Promise<Three> {
   return threePromise;
 }
 
-let d6SourcePromise: Promise<Obj3D> | null = null;
-/** The D6 mesh as a holder whose centre is the origin, one DIE_SIZE across. */
-function loadD6Source(T: Three): Promise<Obj3D> {
-  d6SourcePromise ??= (async () => {
-    const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader.js');
-    const group = await new OBJLoader().loadAsync('/dice/D6.obj');
-    const tex = new T.TextureLoader();
-    const [albedo, normal] = await Promise.all([tex.loadAsync('/dice/D6-albedo.png'), tex.loadAsync('/dice/D6-normal.png')]);
-    albedo.colorSpace = T.SRGBColorSpace;
-    const mat = new T.MeshStandardMaterial({ map: albedo, normalMap: normal, roughness: 0.55, metalness: 0.02 });
-    group.traverse((o) => {
-      const m = o as MeshO;
-      if (m.isMesh) m.material = mat;
-    });
-    const box = new T.Box3().setFromObject(group);
-    const size = box.getSize(new T.Vector3());
-    const centre = box.getCenter(new T.Vector3());
-    const k = DIE_SIZE / Math.max(size.x, size.y, size.z);
-    const holder = new T.Group();
-    group.scale.setScalar(k);
-    group.position.copy(centre.multiplyScalar(-k));
-    holder.add(group);
-    return holder;
-  })();
-  return d6SourcePromise;
-}
+let boxModulePromise: Promise<typeof import('three/examples/jsm/geometries/RoundedBoxGeometry.js')> | null = null;
 
-/** A pentagonal bipyramid: the readable stand-in for a ten-sided die. */
-function polyGeo(T: Three, sides: number): Geo {
-  const r = 0.46;
-  if (sides === 4) return new T.TetrahedronGeometry(r * 1.2);
-  if (sides === 8) return new T.OctahedronGeometry(r);
-  if (sides === 12) return new T.DodecahedronGeometry(r);
-  if (sides === 20) return new T.IcosahedronGeometry(r);
-  const parts: number[] = [];
-  const ring: number[][] = [];
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-    ring.push([Math.cos(a) * 0.52, 0, Math.sin(a) * 0.52]);
-  }
-  const top = [0, 0.6, 0];
-  const bottom = [0, -0.6, 0];
-  for (let i = 0; i < 5; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % 5];
-    parts.push(...top, ...a, ...b, ...bottom, ...b, ...a);
-  }
-  const g = new T.BufferGeometry();
-  g.setAttribute('position', new T.Float32BufferAttribute(parts, 3));
-  g.computeVertexNormals();
-  return g;
-}
-
-function badgeTexture(T: Three, text: string): import('three').Texture {
+/** The canvas the pip art lives on: six square cells (3x3 grid), value 1..6. */
+let pipTexture: import('three').Texture | null = null;
+function getPipTexture(T: Three): import('three').Texture {
+  if (pipTexture) return pipTexture;
+  const cell = 256;
   const c = document.createElement('canvas');
-  c.width = 160;
-  c.height = 160;
+  c.width = cell * 3;
+  c.height = cell * 3;
   const ctx = c.getContext('2d')!;
-  const x = 18;
-  const y = 32;
-  const w = 124;
-  const h = 96;
-  const r = 26;
-  ctx.fillStyle = 'rgba(10, 12, 16, 0.88)';
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#f2f4f8';
-  ctx.font = '700 60px system-ui, sans-serif';
+  ctx.fillStyle = BASE;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = INK;
+  const off = cell * 0.2;
+  const r = cell * 0.06;
+  const PATTERNS: Record<number, [number, number][]> = {
+    1: [[0, 0]],
+    2: [[-off, -off], [off, off]],
+    3: [[-off, -off], [0, 0], [off, off]],
+    4: [[-off, -off], [off, -off], [-off, off], [off, off]],
+    5: [[-off, -off], [off, -off], [0, 0], [-off, off], [off, off]],
+    6: [[-off, -off], [off, -off], [-off, 0], [off, 0], [-off, off], [off, off]],
+  };
+  for (let v = 1; v <= 6; v++) {
+    const cx = ((v - 1) % 3) * cell + cell / 2;
+    const cy = Math.floor((v - 1) / 3) * cell + cell / 2;
+    for (const [px, py] of PATTERNS[v]) {
+      ctx.beginPath();
+      ctx.arc(cx + px, cy + py, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  pipTexture = new T.CanvasTexture(c);
+  pipTexture.colorSpace = T.SRGBColorSpace;
+  return pipTexture;
+}
+
+/** The canvas the numbers live on: 25 square cells, value 1..25. */
+let numberTexture: import('three').Texture | null = null;
+function getNumberTexture(T: Three): import('three').Texture {
+  if (numberTexture) return numberTexture;
+  const cell = 256;
+  const c = document.createElement('canvas');
+  c.width = cell * 5;
+  c.height = cell * 5;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = BASE;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = INK;
+  ctx.font = `700 ${cell * 0.42}px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, c.width / 2, c.height / 2 + 2);
-  const t = new T.CanvasTexture(c);
-  t.colorSpace = T.SRGBColorSpace;
-  return t;
+  for (let v = 1; v <= 25; v++) {
+    const cx = ((v - 1) % 5) * cell + cell / 2;
+    const cy = Math.floor((v - 1) / 5) * cell + cell / 2;
+    ctx.fillText(String(v), cx, cy + cell * 0.02);
+  }
+  numberTexture = new T.CanvasTexture(c);
+  numberTexture.colorSpace = T.SRGBColorSpace;
+  return numberTexture;
 }
 
 let shadowTexture: import('three').Texture | null = null;
@@ -166,7 +143,256 @@ function getShadowTexture(T: Three): import('three').Texture {
   return shadowTexture;
 }
 
+/** A small name tag for the roller, drawn on a sprite. */
+function whoTexture(T: Three, who: string): import('three').Texture {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const x = 4;
+  const y = 12;
+  const w = 504;
+  const h = 104;
+  const r = 40;
+  ctx.fillStyle = 'rgba(10, 12, 16, 0.82)';
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = BASE;
+  ctx.font = "700 58px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(who.slice(0, 20), c.width / 2, c.height / 2 + 2);
+  const t = new T.CanvasTexture(c);
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+
 let shadowGeo: Geo | null = null;
+
+// ---------------------------------------------------------------------------
+// Geometry. Every die is baked once per shape: unit-sized, with UVs pointing
+// each face at its own cell of the pip/number canvas, and a face table the
+// settle math uses to bring the rolled value to the top.
+// ---------------------------------------------------------------------------
+
+interface FaceInfo {
+  normal: Vec3;
+  /** In-plane vector that should read "up" when this face is on top. */
+  readUp: Vec3;
+}
+
+interface DieGeo {
+  geo: Geo;
+  /** faces[value - 1] */
+  faces: FaceInfo[];
+}
+
+const geos = new Map<number, DieGeo>();
+
+/** How the cube's six faces map to values (opposites sum to 7). */
+const CUBE_FACES: { axis: [number, number, number]; e1: [number, number, number]; e2: [number, number, number]; value: number }[] = [
+  { axis: [1, 0, 0], e1: [0, 0, -1], e2: [0, 1, 0], value: 1 },
+  { axis: [-1, 0, 0], e1: [0, 0, 1], e2: [0, 1, 0], value: 6 },
+  { axis: [0, 1, 0], e1: [1, 0, 0], e2: [0, 0, -1], value: 2 },
+  { axis: [0, -1, 0], e1: [1, 0, 0], e2: [0, 0, 1], value: 5 },
+  { axis: [0, 0, 1], e1: [1, 0, 0], e2: [0, 1, 0], value: 3 },
+  { axis: [0, 0, -1], e1: [-1, 0, 0], e2: [0, 1, 0], value: 4 },
+];
+
+/** A rounded cube with the pips baked into its UVs. */
+async function buildCube(T: Three): Promise<DieGeo> {
+  boxModulePromise ??= import('three/examples/jsm/geometries/RoundedBoxGeometry.js');
+  const { RoundedBoxGeometry } = await boxModulePromise;
+  const geo = new RoundedBoxGeometry(1, 1, 1, 4, 0.17) as unknown as Geo;
+  const pos = geo.getAttribute('position');
+  const uv = new Float32Array(pos.count * 2);
+  const cellW = 1 / 3;
+  const cellH = 1 / 3;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+    const az = Math.abs(z);
+    let f = CUBE_FACES[0];
+    if (ax >= ay && ax >= az) f = x > 0 ? CUBE_FACES[0] : CUBE_FACES[1];
+    else if (ay >= az) f = y > 0 ? CUBE_FACES[2] : CUBE_FACES[3];
+    else f = z > 0 ? CUBE_FACES[4] : CUBE_FACES[5];
+    const [e1x, e1y, e1z] = f.e1;
+    const [e2x, e2y, e2z] = f.e2;
+    const lu = x * e1x + y * e1y + z * e1z;
+    const lv = x * e2x + y * e2y + z * e2z;
+    const col = (f.value - 1) % 3;
+    const row = Math.floor((f.value - 1) / 3);
+    const cx = (col + 0.5) * cellW;
+    const cy = 1 - (row + 0.5) * cellH;
+    const half = 0.4 * Math.min(cellW, cellH);
+    uv[i * 2] = cx + (lu / 0.5) * half;
+    uv[i * 2 + 1] = cy + (lv / 0.5) * half;
+  }
+  geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+  const faces: FaceInfo[] = [];
+  for (const f of CUBE_FACES) faces[f.value - 1] = { normal: new T.Vector3(...f.axis), readUp: new T.Vector3(...f.e2) };
+  return { geo, faces };
+}
+
+/** The pentagonal trapezohedron (the real d10 shape, planar kites), soup. */
+function buildD10(T: Three): Geo {
+  // Ring height and apex height are tied: yT = 9.47 * y1 keeps the kite faces
+  // planar (checked by hand on the cross product), so each face shades flat.
+  const y1 = 0.052;
+  const yT = 0.492;
+  const R = 0.42;
+  const U: [number, number, number][] = [];
+  const L: [number, number, number][] = [];
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    U.push([Math.cos(a) * R, y1, Math.sin(a) * R]);
+    const b = a + Math.PI / 5;
+    L.push([Math.cos(b) * R, -y1, Math.sin(b) * R]);
+  }
+  const top: [number, number, number] = [0, yT, 0];
+  const bot: [number, number, number] = [0, -yT, 0];
+  const tris: number[] = [];
+  const quad = (a: number[], b: number[], c: number[], d: number[]) => {
+    tris.push(...a, ...b, ...c, ...a, ...c, ...d);
+  };
+  for (let i = 0; i < 5; i++) {
+    quad(top, U[i], L[i], U[(i + 1) % 5]);
+  }
+  for (let i = 0; i < 5; i++) {
+    quad(bot, L[i], U[(i + 1) % 5], L[(i + 1) % 5]);
+  }
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.Float32BufferAttribute(tris, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Bake a triangle-soup geometry: group by plane, point each face at a cell. */
+function bakePoly(T: Three, geo: Geo, suffix: string): DieGeo {
+  const pos = geo.getAttribute('position');
+  const triCount = pos.count / 3;
+  const nrm = (t: number): [number, number, number] => {
+    const i = t * 3;
+    const ux = pos.getX(i + 1) - pos.getX(i);
+    const uy = pos.getY(i + 1) - pos.getY(i);
+    const uz = pos.getZ(i + 1) - pos.getZ(i);
+    const vx = pos.getX(i + 2) - pos.getX(i);
+    const vy = pos.getY(i + 2) - pos.getY(i);
+    const vz = pos.getZ(i + 2) - pos.getZ(i);
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    const ln = Math.hypot(nx, ny, nz) || 1;
+    return [nx / ln, ny / ln, nz / ln];
+  };
+  // Group triangles that share a plane: same unit normal to 2 decimals.
+  const groups: number[][] = [];
+  const keys = new Map<string, number>();
+  for (let t = 0; t < triCount; t++) {
+    const key = nrm(t).map((v) => v.toFixed(2)).join(',') + suffix;
+    let g = keys.get(key);
+    if (g === undefined) {
+      g = groups.length;
+      keys.set(key, g);
+      groups.push([]);
+    }
+    groups[g].push(t);
+  }
+  const uv = new Float32Array(pos.count * 2);
+  const faces: FaceInfo[] = [];
+  groups.forEach((tris, idx) => {
+    const verts: number[] = [];
+    for (const t of tris) {
+      for (let k = 0; k < 3; k++) {
+        const vi = t * 3 + k;
+        if (!verts.includes(vi)) verts.push(vi);
+      }
+    }
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const vi of verts) {
+      cx += pos.getX(vi);
+      cy += pos.getY(vi);
+      cz += pos.getZ(vi);
+    }
+    cx /= verts.length;
+    cy /= verts.length;
+    cz /= verts.length;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+    for (const t of tris) {
+      const n = nrm(t);
+      nx += n[0];
+      ny += n[1];
+      nz += n[2];
+    }
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl;
+    ny /= nl;
+    nz /= nl;
+    // readUp: toward the face's highest vertex, within the face plane.
+    let up: [number, number, number] = [1, 0, 0];
+    let best = -Infinity;
+    for (const vi of verts) {
+      const dy = pos.getY(vi) - cy;
+      if (dy > best) {
+        best = dy;
+        up = [pos.getX(vi) - cx, dy, pos.getZ(vi) - cz];
+      }
+    }
+    const ul = Math.hypot(up[0], up[1], up[2]) || 1;
+    const e2: [number, number, number] = [up[0] / ul, up[1] / ul, up[2] / ul];
+    // right = e2 x normal: faces read non-mirrored when seen from outside.
+    const e1: [number, number, number] = [e2[1] * nz - e2[2] * ny, e2[2] * nx - e2[0] * nz, e2[0] * ny - e2[1] * nx];
+    let maxLocal = 1e-6;
+    for (const vi of verts) {
+      const lu = (pos.getX(vi) - cx) * e1[0] + (pos.getY(vi) - cy) * e1[1] + (pos.getZ(vi) - cz) * e1[2];
+      const lv = (pos.getX(vi) - cx) * e2[0] + (pos.getY(vi) - cy) * e2[1] + (pos.getZ(vi) - cz) * e2[2];
+      maxLocal = Math.max(maxLocal, Math.hypot(lu, lv));
+    }
+    const value = idx + 1;
+    const col = (value - 1) % 5;
+    const row = Math.floor((value - 1) / 5);
+    const ccu = (col + 0.5) / 5;
+    const ccv = 1 - (row + 0.5) / 5;
+    const s = 0.34 / 5 / maxLocal;
+    for (const vi of verts) {
+      const lu = (pos.getX(vi) - cx) * e1[0] + (pos.getY(vi) - cy) * e1[1] + (pos.getZ(vi) - cz) * e1[2];
+      const lv = (pos.getX(vi) - cx) * e2[0] + (pos.getY(vi) - cy) * e2[1] + (pos.getZ(vi) - cz) * e2[2];
+      uv[vi * 2] = ccu + lu * s;
+      uv[vi * 2 + 1] = ccv + lv * s;
+    }
+    faces[value - 1] = { normal: new T.Vector3(nx, ny, nz), readUp: new T.Vector3(e2[0], e2[1], e2[2]) };
+  });
+  geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
+  return { geo, faces };
+}
+
+/** Build (once) the unit geometry for a shape. */
+async function getDieGeo(T: Three, sides: number): Promise<DieGeo | null> {
+  const hit = geos.get(sides);
+  if (hit) return hit;
+  let dg: DieGeo | null = null;
+  if (sides === 6) dg = await buildCube(T);
+  else if (sides === 4) dg = bakePoly(T, new T.TetrahedronGeometry(0.5), 't4');
+  else if (sides === 8) dg = bakePoly(T, new T.OctahedronGeometry(0.55), 't8');
+  else if (sides === 10) dg = bakePoly(T, buildD10(T), 't10');
+  else if (sides === 12) dg = bakePoly(T, new T.DodecahedronGeometry(0.48), 't12');
+  else if (sides === 20) dg = bakePoly(T, new T.IcosahedronGeometry(0.5), 't20');
+  if (dg) geos.set(sides, dg);
+  return dg;
+}
 
 // ---------------------------------------------------------------------------
 // The drop
@@ -174,15 +400,13 @@ let shadowGeo: Geo | null = null;
 
 interface Die {
   group: Obj3D;
-  body: MeshO;
-  shadow: MeshO;
-  badge?: SpriteO;
+  shadow: Obj3D & { material: AnyMat };
+  badge: SpriteO | null;
   mat: Mat;
-  ownGeo: boolean;
   h0: number;
   from: { x: number; z: number };
   to: { x: number; z: number };
-  spinAxis: import('three').Vector3;
+  spinAxis: Vec3;
   spinRate: number;
   settleQ: import('three').Quaternion;
   startQ: import('three').Quaternion;
@@ -201,78 +425,72 @@ interface World {
   scene: import('three').Scene;
   camera: import('three').PerspectiveCamera;
   dice: Die[];
+  label: SpriteO | null;
   raf: number;
   start: number;
-  meshSource: Obj3D | null;
-  meshPromise: Promise<void> | null;
+  dieSize: number;
   observer: ResizeObserver;
 }
 
 const easeOutCubic = (u: number) => 1 - Math.pow(1 - u, 3);
 
 /** Height of a die above the floor at t (ms): a drop and two small bounces. */
-function heightAt(t: number, h0: number): number {
-  const rest = DIE_SIZE * 0.5;
+function heightAt(t: number, h0: number, size: number): number {
+  const rest = size * 0.5;
   if (t < 620) {
     const u = t / 620;
     return h0 - (h0 - rest) * u * u;
   }
   if (t < 960) {
     const u = (t - 620) / 340;
-    return rest + DIE_SIZE * 0.55 * Math.sin(Math.PI * u) * (1 - u * 0.25);
+    return rest + size * 0.55 * Math.sin(Math.PI * u) * (1 - u * 0.25);
   }
   if (t < 1240) {
     const u = (t - 960) / 280;
-    return rest + DIE_SIZE * 0.16 * Math.sin(Math.PI * u) * (1 - u * 0.4);
+    return rest + size * 0.16 * Math.sin(Math.PI * u) * (1 - u * 0.4);
   }
   return rest;
 }
 
-function firstMesh(o: Obj3D): MeshO {
-  const m = o as MeshO;
-  if (m.isMesh) return m;
-  for (const child of o.children) {
-    const found = firstMesh(child);
-    if (found) return found;
-  }
-  return o as unknown as MeshO;
+/** Spin the die so face `value` lands up (or down for the d4), reading upright. */
+function settleQuat(T: Three, dg: DieGeo, value: number, down: boolean): import('three').Quaternion {
+  const face = dg.faces[((value - 1) % dg.faces.length + dg.faces.length) % dg.faces.length];
+  const faceQ = new T.Quaternion().setFromUnitVectors(face.normal.clone().normalize(), new T.Vector3(0, down ? -1 : 1, 0));
+  const rU = face.readUp.clone().applyQuaternion(faceQ);
+  // Spin about the vertical so the top face's "up" points away from the
+  // camera: that is the direction that reads upward on screen.
+  const ang = Math.atan2(rU.x, -rU.z);
+  const yaw = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), ang);
+  return yaw.multiply(faceQ);
 }
 
-function spawnDie(T: Three, world: World, die: BoardDie, index: number, count: number, spanX: number): Die {
+function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: number, count: number, spanX: number): Die {
+  const size = world.dieSize;
   // Lay the dice out inside the width the camera can actually show: a wide
   // stage fits six in a row, a narrow one wraps to more rows.
-  const perRow = Math.max(1, Math.min(6, Math.floor(spanX / 0.72)));
+  const perRow = Math.max(1, Math.min(6, Math.floor(spanX / (size * 1.18))));
   const cols = Math.min(count, perRow);
   const rows = Math.ceil(count / cols);
-  const spacing = Math.min(0.95, Math.max(0.55, (spanX * 0.78) / cols));
+  const spacing = Math.min(size * 1.5, Math.max(size * 0.95, (spanX * 0.78) / cols));
   const col = index % cols;
   const row = Math.floor(index / cols);
-  const to = { x: (col - (cols - 1) / 2) * spacing + (Math.random() - 0.5) * 0.14, z: (row - (rows - 1) / 2) * 0.98 + (Math.random() - 0.5) * 0.26 };
-  const from = { x: to.x + (Math.random() - 0.5) * 1.5, z: to.z - 1.5 - Math.random() * 0.7 };
-  const h0 = 2.6 + Math.random() * 0.9;
+  const to = {
+    x: (col - (cols - 1) / 2) * spacing + (Math.random() - 0.5) * size * 0.24,
+    z: (row - (rows - 1) / 2) * size * 1.5 + (Math.random() - 0.5) * size * 0.42,
+  };
+  const from = { x: to.x + (Math.random() - 0.5) * size * 2.4, z: to.z - size * 2.4 - Math.random() * size * 1.1 };
+  const h0 = size * (4.2 + Math.random() * 1.4);
 
-  let body: MeshO;
-  let mat: Mat;
-  let ownGeo = false;
-  if (die.sides === 6 && world.meshSource) {
-    const inner = (world.meshSource as Obj3D).children[0];
-    body = inner.clone(true) as unknown as MeshO;
-    // Shared geometry, private material: fades and dimming never touch the
-    // other dice (or the source).
-    body.traverse((o) => {
-      const m = o as MeshO;
-      if (m.isMesh) m.material = (m.material as Mat).clone();
-    });
-    mat = firstMesh(body).material as Mat;
-  } else {
-    mat = new T.MeshStandardMaterial({ color: 0xf2f3f5, roughness: 0.48, metalness: 0.02, flatShading: true, transparent: true });
-    const geo = die.sides === 6 ? new T.BoxGeometry(DIE_SIZE, DIE_SIZE, DIE_SIZE) : polyGeo(T, die.sides);
-    body = new T.Mesh(geo, mat);
-    ownGeo = true;
-  }
-  mat.transparent = true;
+  const mat = new T.MeshStandardMaterial({
+    map: die.sides === 6 ? getPipTexture(T) : getNumberTexture(T),
+    roughness: 0.46,
+    metalness: 0.02,
+    flatShading: die.sides !== 6,
+    transparent: true,
+  });
   if (die.drop) mat.color = new T.Color(0xb9bec7); // a dropped die reads dimmer
-
+  const body = new T.Mesh(dg.geo, mat);
+  body.scale.setScalar(size);
   const group = new T.Group();
   group.add(body);
   group.position.set(from.x, h0, from.z);
@@ -282,31 +500,42 @@ function spawnDie(T: Three, world: World, die: BoardDie, index: number, count: n
   const shadow = new T.Mesh(shadowGeo, new T.MeshBasicMaterial({ map: getShadowTexture(T), transparent: true, opacity: 0.32, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.set(from.x, 0.011, from.z);
-  shadow.scale.setScalar(DIE_SIZE * 1.7);
+  shadow.scale.setScalar(size * 1.7);
   world.scene.add(shadow);
 
-  // Cube dice show the value on the face itself; the rest carry a badge.
-  let badge: SpriteO | undefined;
-  if (die.sides !== 6) {
-    badge = new T.Sprite(new T.SpriteMaterial({ map: badgeTexture(T, String(die.value)), transparent: true, opacity: 0, depthWrite: false }));
-    badge.scale.set(0.46, 0.46, 1);
-    badge.position.set(to.x, DIE_SIZE * 0.5 + 0.5, to.z);
+  // A tetrahedron rests on the rolled face, so it cannot show the number from
+  // above — it carries a small badge; every other die reads off its own face.
+  let badge: SpriteO | null = null;
+  if (die.sides === 4) {
+    const c = document.createElement('canvas');
+    c.width = 160;
+    c.height = 160;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = 'rgba(10, 12, 16, 0.88)';
+    ctx.beginPath();
+    ctx.arc(80, 80, 66, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = BASE;
+    ctx.font = '700 66px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(die.value), 80, 84);
+    const tx = new T.CanvasTexture(c);
+    tx.colorSpace = T.SRGBColorSpace;
+    badge = new T.Sprite(new T.SpriteMaterial({ map: tx, transparent: true, opacity: 0, depthWrite: false }));
+    badge.scale.set(size * 0.6, size * 0.6, 1);
+    badge.position.set(to.x, size * 1.25, to.z);
     world.scene.add(badge);
   }
 
-  const axis = D6_UP[((die.value - 1) % 6) + 1] ?? [0, 1, 0];
-  const faceQ = new T.Quaternion().setFromUnitVectors(new T.Vector3(axis[0], axis[1], axis[2]).normalize(), new T.Vector3(0, 1, 0));
-  const yaw = new T.Quaternion().setFromAxisAngle(new T.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
-  const settleQ = die.sides === 6 ? yaw.clone().multiply(faceQ) : yaw;
+  const settleQ = settleQuat(T, dg, die.value, die.sides === 4);
   const spinAxis = new T.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
 
   return {
     group,
-    body,
-    shadow,
+    shadow: shadow as unknown as Obj3D & { material: AnyMat },
     badge,
     mat,
-    ownGeo,
     h0,
     from,
     to,
@@ -325,30 +554,37 @@ function spawnDie(T: Three, world: World, die: BoardDie, index: number, count: n
 
 function removeDie(world: World, d: Die) {
   world.scene.remove(d.group, d.shadow);
-  if (d.badge) world.scene.remove(d.badge);
-  if (d.ownGeo) d.body.geometry.dispose();
-  d.mat.dispose();
-  (d.shadow.material as AnyMat).dispose();
   if (d.badge) {
+    world.scene.remove(d.badge);
     const bm = d.badge.material as unknown as { map?: { dispose(): void }; dispose(): void };
     bm.map?.dispose();
     bm.dispose();
   }
+  d.mat.dispose();
+  d.shadow.material.dispose();
 }
 
 function clearWorld(world: World) {
   for (const d of world.dice) removeDie(world, d);
   world.dice = [];
+  if (world.label) {
+    world.scene.remove(world.label);
+    const lm = world.label.material as unknown as { map?: { dispose(): void }; dispose(): void };
+    lm.map?.dispose();
+    lm.dispose();
+    world.label = null;
+  }
 }
 
 function tick(world: World) {
   const t = performance.now() - world.start;
+  const size = world.dieSize;
   for (const d of world.dice) {
     if (t < 1240) {
       const u = easeOutCubic(Math.min(1, t / 620));
       d.x = d.from.x + (d.to.x - d.from.x) * u;
       d.z = d.from.z + (d.to.z - d.from.z) * u;
-      d.y = heightAt(t, d.h0);
+      d.y = heightAt(t, d.h0, size);
     }
     if (t < SETTLE_MS) {
       d.group.quaternion.setFromAxisAngle(d.spinAxis, d.spinRate * (t / 1000));
@@ -365,14 +601,18 @@ function tick(world: World) {
     if (d.badge && d.phase === 2) {
       const bu = Math.min(1, Math.max(0, (t - d.spinAt - SETTLE_LERP_MS) / 160));
       d.badge.material.opacity = bu;
-      const s = 0.46 * (0.7 + 0.3 * easeOutCubic(bu));
+      const s = size * 0.6 * (0.7 + 0.3 * easeOutCubic(bu));
       d.badge.scale.set(s, s, 1);
     }
     d.group.position.set(d.x, d.y, d.z);
     d.shadow.position.set(d.x, 0.011, d.z);
-    const lift = Math.max(0, d.y - DIE_SIZE * 0.5);
-    d.shadow.scale.setScalar(DIE_SIZE * 1.7 * (1 + lift * 0.35));
-    (d.shadow.material as AnyMat).opacity = 0.32 * Math.max(0.25, 1 - lift / 3);
+    const lift = Math.max(0, d.y - size * 0.5);
+    d.shadow.scale.setScalar(size * 1.7 * (1 + lift * 0.35));
+    d.shadow.material.opacity = 0.32 * Math.max(0.25, 1 - lift / 3);
+  }
+  if (world.label) {
+    const lu = Math.min(1, Math.max(0, (t - SETTLE_MS - SETTLE_LERP_MS) / 200));
+    world.label.material.opacity = lu;
   }
 
   // Settled dice linger a while, then fade so the map stays readable.
@@ -383,9 +623,10 @@ function tick(world: World) {
       const o = d.drop ? (1 - f) * 0.85 : 1 - f;
       d.mat.opacity = o;
       if (d.badge) d.badge.material.opacity = Math.min(d.badge.material.opacity, o);
-      else (d.shadow.material as AnyMat).opacity *= 0.93;
+      else d.shadow.material.opacity = Math.min(d.shadow.material.opacity, 0.32 * o);
       if (f >= 1) gone = true;
     }
+    if (world.label) world.label.material.opacity = Math.min(world.label.material.opacity, 1 - f);
   }
   if (gone) clearWorld(world);
 
@@ -420,10 +661,10 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     scene,
     camera,
     dice: [],
+    label: null,
     raf: 0,
     start: 0,
-    meshSource: null,
-    meshPromise: null,
+    dieSize: 0.36,
     observer: null as unknown as ResizeObserver,
   };
   const resize = () => {
@@ -433,18 +674,17 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // Keep the dice the same size ON SCREEN whatever the stage is: the world
+    // span the camera sees at the dice plane scales with the aspect ratio.
+    world.dieSize = Math.min(0.55, Math.max(0.14, (DIE_PX * VIS_W * (w / h)) / w));
   };
   world.observer = new ResizeObserver(resize);
   world.observer.observe(host);
   resize();
-  // Keep the tab alive through GPU resets: allow the restore, drop the dice
-  // (three re-uploads textures on demand), and warm the D6 mesh so the first
-  // d6 roll does not sit on the network.
+  // Keep the tab alive through GPU resets: allow the restore and drop the dice
+  // (three re-uploads textures on demand).
   renderer.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault());
   renderer.domElement.addEventListener('webglcontextrestored', () => clearWorld(world));
-  void loadD6Source(T).catch(() => {
-    /* no mesh: the cubes fall back to plain boxes */
-  });
   return world;
 }
 
@@ -462,24 +702,39 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
     try {
       let world = worldRef.current;
       if (!world || world.host !== host) worldRef.current = world = await ensureWorld(host);
-      if (!world.meshPromise) {
-        world.meshPromise = loadD6Source(world.T)
-          .then((src) => {
-            world!.meshSource = src;
-          })
-          .catch(() => {
-            /* no mesh: the cubes fall back to plain boxes */
-          });
+
+      // Only the shapes this roll actually uses need building first.
+      const wanted = want.dice.slice(0, MAX_DICE).filter((d) => (SHAPES as readonly number[]).includes(d.sides));
+      const built = new Map<number, DieGeo>();
+      for (const d of wanted) {
+        if (built.has(d.sides)) continue;
+        const dg = await getDieGeo(world.T, d.sides);
+        if (dg) built.set(d.sides, dg);
       }
-      if (want.dice.some((d) => d.sides === 6)) await world.meshPromise;
-      if (wantedRef.current !== want) return; // a newer roll arrived while loading
+      if (wantedRef.current !== want) return; // a newer roll arrived while building
       if (world.raf) cancelAnimationFrame(world.raf);
       world.raf = 0;
       clearWorld(world);
-      const dice = want.dice.slice(0, MAX_DICE);
       const spanX = Math.min(4.6, Math.max(2.0, 3.4 * world.camera.aspect));
-      dice.forEach((d, i) => world!.dice.push(spawnDie(world!.T, world!, d, i, dice.length, spanX)));
+      let maxZ = -Infinity;
+      for (let i = 0; i < wanted.length; i++) {
+        const dg = built.get(wanted[i].sides);
+        if (!dg) continue;
+        const die = spawnDie(world.T, world, dg, wanted[i], i, wanted.length, spanX);
+        maxZ = Math.max(maxZ, die.to.z);
+        world.dice.push(die);
+      }
       if (!world.dice.length) return;
+      if (want.who) {
+        const T = world.T;
+        const label = new T.Sprite(
+          new T.SpriteMaterial({ map: whoTexture(T, want.who), transparent: true, opacity: 0, depthWrite: false }),
+        );
+        label.scale.set(world.dieSize * 3.4, world.dieSize * 0.85, 1);
+        label.position.set(0, world.dieSize * 0.35, maxZ + world.dieSize * 2.6);
+        world.scene.add(label);
+        world.label = label;
+      }
       world.start = performance.now();
       world.renderer.render(world.scene, world.camera);
       world.raf = requestAnimationFrame(() => tick(world!));

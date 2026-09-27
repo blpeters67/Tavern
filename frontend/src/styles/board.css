@@ -56,9 +56,17 @@
   letter-spacing: 0.02em;
   cursor: pointer;
   max-width: 340px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.board-title-button svg {
+  flex-shrink: 0;
 }
 
 .board-title-button span {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -317,21 +325,15 @@
 
 /* ---------- Tools and the token tray ---------- */
 
-.board-tools {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
-  z-index: 4;
+.board-top-tools {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 5px;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 3px 5px;
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-floating) 85%, transparent);
-  box-shadow: var(--shadow-high);
-  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg-floating) 60%, transparent);
 }
 
 .board-tool {
@@ -700,6 +702,33 @@
 
 /* ---------- Phones ---------- */
 
+@media (max-width: 1500px) {
+  /* Narrower than a full desktop window the bar runs out of room by a hair:
+     tuck the tool buttons in and drop the viewer avatars rather than let the
+     Leave button clip (it has no menu twin, so it must stay legible). */
+  .board-tool {
+    width: 28px;
+    height: 28px;
+  }
+
+  .board-viewers {
+    display: none;
+  }
+}
+
+@media (max-width: 1150px) {
+  /* The bar is tight: the title gives room, the zoom percentage drops and the
+     token/background buttons step aside (both live in menus too). */
+  .board-title-button {
+    max-width: 210px;
+  }
+
+  .board-zoom-pct,
+  .board-tool-secondary {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .board-chat {
     display: none;
@@ -720,6 +749,7 @@
 
 .board-stage.tool-pen,
 .board-stage.tool-arrow,
+.board-stage.tool-line,
 .board-stage.tool-rect,
 .board-stage.tool-ellipse,
 .board-stage.tool-ruler {
@@ -741,20 +771,19 @@
 }
 
 .board-tool-sep {
-  width: 22px;
-  height: 1px;
-  margin: 3px auto;
+  width: 1px;
+  height: 22px;
+  margin: 0 3px;
   background: var(--divider-strong);
 }
 
 .board-palette {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 5px;
-  margin-top: 3px;
-  padding-top: 6px;
-  border-top: 1px solid var(--divider-strong);
+  margin-left: 3px;
+  padding-left: 7px;
+  border-left: 1px solid var(--divider-strong);
 }
 
 .board-palette-dot {
@@ -837,9 +866,9 @@
 
 .board-dice-tray {
   position: absolute;
-  top: 50%;
-  right: calc(100% + 10px);
-  transform: translateY(-50%);
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
   display: flex;
   flex-direction: column;
   gap: 8px;

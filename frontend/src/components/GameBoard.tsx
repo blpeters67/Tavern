@@ -2,7 +2,7 @@
  * theater but for the table. A saved board per server with a background
  * picture, a grid, character tokens (green allies, grey neutrals, red
  * enemies), and a chat column beside it. */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { api, errorMessage, upload } from '../api/http';
 import { gateway } from '../api/gateway';
@@ -32,7 +32,7 @@ import {
   mdiDiceD8,
   mdiDiceMultiple,
   mdiDraw,
-  mdiEllipseOutline,
+  mdiCircleOutline,
   mdiFormatText,
   mdiImage,
   mdiMinus,
@@ -43,6 +43,7 @@ import {
   mdiRuler,
   mdiTrashCanOutline,
   mdiUndo,
+  mdiVectorLine,
   mdiViewGrid,
 } from './icons';
 import { CardEye } from './Jukebox';
@@ -570,7 +571,7 @@ const TokenView = memo(function TokenView({
 // ---------------------------------------------------------------------------
 
 /** What the drawing tools paint. The server keeps the same shape. */
-type DrawKind = 'pen' | 'arrow' | 'rect' | 'ellipse';
+type DrawKind = 'pen' | 'arrow' | 'line' | 'rect' | 'ellipse';
 type Shape = { kind: BoardDrawing['kind']; color: string; width: number; data: BoardDrawing['data'] };
 type Pt = { x: number; y: number };
 type Draft = { kind: DrawKind; from: Pt; to: Pt; points: [number, number][] };
@@ -605,6 +606,10 @@ const DrawingShape = memo(function DrawingShape({ d }: { d: Shape }) {
   }
   if (d.kind === 'ellipse') {
     return <ellipse cx={(fx + tx) / 2} cy={(fy + ty) / 2} rx={Math.abs(tx - fx) / 2} ry={Math.abs(ty - fy) / 2} fill="none" {...common} />;
+  }
+  // A plain straight line: a shaft with no head.
+  if (d.kind === 'line') {
+    return <line x1={fx} y1={fy} x2={tx} y2={ty} fill="none" {...common} />;
   }
   // The arrow: a shaft plus a head that stops short of the tip.
   const len = Math.hypot(tx - fx, ty - fy) || 1;
@@ -657,6 +662,7 @@ function BoardTopBar({
   uploadPct,
   onPickBackground,
   canControl,
+  tools,
 }: {
   serverId: number;
   sb: ServerBoard;
@@ -668,6 +674,7 @@ function BoardTopBar({
   uploadPct: number | null;
   onPickBackground: () => void;
   canControl: boolean;
+  tools: ReactNode;
 }) {
   const users = useStore((s) => s.users);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -786,6 +793,7 @@ function BoardTopBar({
           </div>
         )}
       </div>
+      <div className="board-top-tools">{tools}</div>
       <div className="board-top-spacer" />
       {uploadPct !== null && <span className="board-uploading">Uploading… {Math.round(uploadPct * 100)}%</span>}
       <div className="board-zoom">
@@ -950,7 +958,7 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           for (const r of term.rolls) dice.push({ sides: term.sides, value: r.v, drop: !!r.drop });
         }
       }
-      if (dice.length) setDiceRoll({ id: ++diceSeq.current, dice });
+      if (dice.length) setDiceRoll({ id: ++diceSeq.current, dice, who: m.author ? displayName(m.author) : undefined });
     });
   }, [diceChannel]);
 
@@ -1452,6 +1460,112 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
           uploadPct={uploadPct}
           onPickBackground={() => fileInput.current?.click()}
           canControl={canControl}
+          tools={
+            <>
+              <button className={`board-tool ${tool === 'select' ? 'active' : ''}`} aria-label="Select" onClick={() => pickTool('select')} {...tip('Select — drag the board to pan, drag a token to move it (middle-drag always pans)')}>
+                <Icon path={mdiCursorDefault} size={20} />
+              </button>
+              {canControl && (
+                <button
+                  className="board-tool board-tool-secondary"
+                  aria-label="Place a token"
+                  onClick={() => openModal((close) => <NewTokenModal serverId={serverId} board={board} at={centerPoint} onClose={close} />)}
+                  {...tip('Place a token')}
+                >
+                  <Icon path={mdiAccountPlus} size={20} />
+                </button>
+              )}
+              {canControl && (
+                <button className="board-tool board-tool-secondary" aria-label="Change the background" onClick={() => fileInput.current?.click()} {...tip('Change the background picture')}>
+                  <Icon path={mdiImage} size={20} />
+                </button>
+              )}
+              <span className="board-tool-sep" />
+              <button className={`board-tool ${tool === 'pen' ? 'active' : ''}`} aria-label="Draw freehand" onClick={() => pickTool('pen')} {...tip('Draw — drag to sketch on the map')}>
+                <Icon path={mdiDraw} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'arrow' ? 'active' : ''}`} aria-label="Arrow" onClick={() => pickTool('arrow')} {...tip('Arrow — drag from where it starts to where it points')}>
+                <Icon path={mdiArrowTopRight} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'line' ? 'active' : ''}`} aria-label="Line" onClick={() => pickTool('line')} {...tip('Line — drag to draw a straight line')}>
+                <Icon path={mdiVectorLine} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'rect' ? 'active' : ''}`} aria-label="Rectangle" onClick={() => pickTool('rect')} {...tip('Rectangle — drag out a box (a wall, a zone, a room)')}>
+                <Icon path={mdiRectangleOutline} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'ellipse' ? 'active' : ''}`} aria-label="Circle or oval" onClick={() => pickTool('ellipse')} {...tip('Circle — drag out a circle (a spell area, a campfire)')}>
+                <Icon path={mdiCircleOutline} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'text' ? 'active' : ''}`} aria-label="Text" onClick={() => pickTool('text')} {...tip('Text — click the map to write a label')}>
+                <Icon path={mdiFormatText} size={20} />
+              </button>
+              <button className={`board-tool ${tool === 'ruler' ? 'active' : ''}`} aria-label="Ruler" onClick={() => pickTool('ruler')} {...tip('Ruler — drag to measure; the distance shows on the line')}>
+                <Icon path={mdiRuler} size={20} />
+              </button>
+              <span className="board-tool-sep" />
+              <button className="board-tool" aria-label="Undo" disabled={myDrawings.length === 0} onClick={() => void undo()} {...tip('Undo my last drawing (Ctrl+Z)')}>
+                <Icon path={mdiUndo} size={20} />
+              </button>
+              <button className="board-tool" aria-label="Redo" disabled={redoCount === 0} onClick={() => void redo()} {...tip('Redo (Ctrl+Shift+Z)')}>
+                <Icon path={mdiRedo} size={20} />
+              </button>
+              {canControl && board.drawings.length > 0 && (
+                <button className="board-tool" aria-label="Clear drawings" onClick={clearDrawings} {...tip('Clear every drawing')}>
+                  <Icon path={mdiDeleteSweepOutline} size={20} />
+                </button>
+              )}
+              <span className="board-tool-sep" />
+              <div className="board-dice-wrap">
+                <button className={`board-tool ${diceOpen ? 'active' : ''}`} aria-label="Dice" onClick={() => setDiceOpen((v) => !v)} {...tip('Roll dice on the board')}>
+                  <Icon path={mdiDiceMultiple} size={20} />
+                </button>
+                {diceOpen && (
+                  <div className="board-dice-tray">
+                    <div className="board-dice-row">
+                      {DICE_SIDES.map((s) => (
+                        <button
+                          key={s}
+                          className="board-dice-btn"
+                          aria-label={`Roll a d${s}`}
+                          disabled={!channel}
+                          onClick={() => rollDice(s)}
+                          {...tip(`Roll ${diceCount}d${s}${diceMod ? (diceMod > 0 ? `+${diceMod}` : diceMod) : ''}`)}
+                        >
+                          <Icon path={DICE_ICONS[s]} size={22} />
+                        </button>
+                      ))}
+                    </div>
+                    <div className="board-dice-opts">
+                      <span className="board-dice-label">Dice</span>
+                      <button className="board-dice-step" aria-label="Fewer dice" disabled={diceCount <= 1} onClick={() => setDiceCount((c) => Math.max(1, c - 1))}>
+                        −
+                      </button>
+                      <span className="board-dice-num">{diceCount}</span>
+                      <button className="board-dice-step" aria-label="More dice" disabled={diceCount >= 10} onClick={() => setDiceCount((c) => Math.min(10, c + 1))}>
+                        +
+                      </button>
+                      <span className="board-dice-label">Mod</span>
+                      <button className="board-dice-step" aria-label="Lower the modifier" disabled={diceMod <= -10} onClick={() => setDiceMod((m) => Math.max(-10, m - 1))}>
+                        −
+                      </button>
+                      <span className="board-dice-num">{diceMod > 0 ? `+${diceMod}` : diceMod}</span>
+                      <button className="board-dice-step" aria-label="Raise the modifier" disabled={diceMod >= 10} onClick={() => setDiceMod((m) => Math.min(10, m + 1))}>
+                        +
+                      </button>
+                    </div>
+                    {!channel && <span className="board-dice-quiet">Open a text channel to roll.</span>}
+                  </div>
+                )}
+              </div>
+              {tool !== 'select' && tool !== 'ruler' && (
+                <div className="board-palette">
+                  {DRAW_COLORS.map((c) => (
+                    <button key={c} type="button" className={`board-palette-dot ${color === c ? 'on' : ''}`} style={{ background: c }} aria-label={`Color ${c}`} onClick={() => setColor(c)} />
+                  ))}
+                </div>
+              )}
+            </>
+          }
         />
         <div className="board-stage-wrap">
           <div
@@ -1512,107 +1626,6 @@ export function BoardRoom({ serverId, channel }: { serverId: number; channel: Ch
                 {ruler && <RulerMark a={ruler.a} b={ruler.b} g={board.grid_size} />}
               </svg>
             </div>
-          </div>
-          <div className="board-tools">
-            <button className={`board-tool ${tool === 'select' ? 'active' : ''}`} aria-label="Select" onClick={() => pickTool('select')} {...tip('Select — drag the board to pan, drag a token to move it (middle-drag always pans)')}>
-              <Icon path={mdiCursorDefault} size={20} />
-            </button>
-            {canControl && (
-              <button
-                className="board-tool"
-                aria-label="Place a token"
-                onClick={() => openModal((close) => <NewTokenModal serverId={serverId} board={board} at={centerPoint} onClose={close} />)}
-                {...tip('Place a token')}
-              >
-                <Icon path={mdiAccountPlus} size={20} />
-              </button>
-            )}
-            {canControl && (
-              <button className="board-tool" aria-label="Change the background" onClick={() => fileInput.current?.click()} {...tip('Change the background picture')}>
-                <Icon path={mdiImage} size={20} />
-              </button>
-            )}
-            <span className="board-tool-sep" />
-            <button className={`board-tool ${tool === 'pen' ? 'active' : ''}`} aria-label="Draw freehand" onClick={() => pickTool('pen')} {...tip('Draw — drag to sketch on the map')}>
-              <Icon path={mdiDraw} size={20} />
-            </button>
-            <button className={`board-tool ${tool === 'arrow' ? 'active' : ''}`} aria-label="Arrow" onClick={() => pickTool('arrow')} {...tip('Arrow — drag from where it starts to where it points')}>
-              <Icon path={mdiArrowTopRight} size={20} />
-            </button>
-            <button className={`board-tool ${tool === 'rect' ? 'active' : ''}`} aria-label="Rectangle" onClick={() => pickTool('rect')} {...tip('Rectangle — drag out a box (a wall, a zone, a room)')}>
-              <Icon path={mdiRectangleOutline} size={20} />
-            </button>
-            <button className={`board-tool ${tool === 'ellipse' ? 'active' : ''}`} aria-label="Circle or oval" onClick={() => pickTool('ellipse')} {...tip('Circle — drag out an oval (a spell area, a campfire)')}>
-              <Icon path={mdiEllipseOutline} size={20} />
-            </button>
-            <button className={`board-tool ${tool === 'text' ? 'active' : ''}`} aria-label="Text" onClick={() => pickTool('text')} {...tip('Text — click the map to write a label')}>
-              <Icon path={mdiFormatText} size={20} />
-            </button>
-            <button className={`board-tool ${tool === 'ruler' ? 'active' : ''}`} aria-label="Ruler" onClick={() => pickTool('ruler')} {...tip('Ruler — drag to measure; the distance shows on the line')}>
-              <Icon path={mdiRuler} size={20} />
-            </button>
-            <span className="board-tool-sep" />
-            <button className="board-tool" aria-label="Undo" disabled={myDrawings.length === 0} onClick={() => void undo()} {...tip('Undo my last drawing (Ctrl+Z)')}>
-              <Icon path={mdiUndo} size={20} />
-            </button>
-            <button className="board-tool" aria-label="Redo" disabled={redoCount === 0} onClick={() => void redo()} {...tip('Redo (Ctrl+Shift+Z)')}>
-              <Icon path={mdiRedo} size={20} />
-            </button>
-            {canControl && board.drawings.length > 0 && (
-              <button className="board-tool" aria-label="Clear drawings" onClick={clearDrawings} {...tip('Clear every drawing')}>
-                <Icon path={mdiDeleteSweepOutline} size={20} />
-              </button>
-            )}
-            <span className="board-tool-sep" />
-            <div className="board-dice-wrap">
-              <button className={`board-tool ${diceOpen ? 'active' : ''}`} aria-label="Dice" onClick={() => setDiceOpen((v) => !v)} {...tip('Roll dice on the board')}>
-                <Icon path={mdiDiceMultiple} size={20} />
-              </button>
-              {diceOpen && (
-                <div className="board-dice-tray">
-                  <div className="board-dice-row">
-                    {DICE_SIDES.map((s) => (
-                      <button
-                        key={s}
-                        className="board-dice-btn"
-                        aria-label={`Roll a d${s}`}
-                        disabled={!channel}
-                        onClick={() => rollDice(s)}
-                        {...tip(`Roll ${diceCount}d${s}${diceMod ? (diceMod > 0 ? `+${diceMod}` : diceMod) : ''}`)}
-                      >
-                        <Icon path={DICE_ICONS[s]} size={22} />
-                      </button>
-                    ))}
-                  </div>
-                  <div className="board-dice-opts">
-                    <span className="board-dice-label">Dice</span>
-                    <button className="board-dice-step" aria-label="Fewer dice" disabled={diceCount <= 1} onClick={() => setDiceCount((c) => Math.max(1, c - 1))}>
-                      −
-                    </button>
-                    <span className="board-dice-num">{diceCount}</span>
-                    <button className="board-dice-step" aria-label="More dice" disabled={diceCount >= 10} onClick={() => setDiceCount((c) => Math.min(10, c + 1))}>
-                      +
-                    </button>
-                    <span className="board-dice-label">Mod</span>
-                    <button className="board-dice-step" aria-label="Lower the modifier" disabled={diceMod <= -10} onClick={() => setDiceMod((m) => Math.max(-10, m - 1))}>
-                      −
-                    </button>
-                    <span className="board-dice-num">{diceMod > 0 ? `+${diceMod}` : diceMod}</span>
-                    <button className="board-dice-step" aria-label="Raise the modifier" disabled={diceMod >= 10} onClick={() => setDiceMod((m) => Math.min(10, m + 1))}>
-                      +
-                    </button>
-                  </div>
-                  {!channel && <span className="board-dice-quiet">Open a text channel to roll.</span>}
-                </div>
-              )}
-            </div>
-            {tool !== 'select' && tool !== 'ruler' && (
-              <div className="board-palette">
-                {DRAW_COLORS.map((c) => (
-                  <button key={c} type="button" className={`board-palette-dot ${color === c ? 'on' : ''}`} style={{ background: c }} aria-label={`Color ${c}`} onClick={() => setColor(c)} />
-                ))}
-              </div>
-            )}
           </div>
           <BoardDiceOverlay roll={diceRoll} />
           <TokenTray serverId={serverId} board={board} at={centerPoint} />

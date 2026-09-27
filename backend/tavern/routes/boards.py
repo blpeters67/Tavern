@@ -408,7 +408,7 @@ def _clean_drawing(kind: str, data: dict[str, Any]) -> dict[str, Any]:
         if len(points) < 2:
             raise bad_request("That stroke had no points in it.")
         return {"points": points}
-    if kind in ("arrow", "rect", "ellipse"):
+    if kind in ("arrow", "line", "rect", "ellipse"):
         a, b = _point(data.get("from")), _point(data.get("to"))
         if a is None or b is None:
             raise bad_request("That shape had no ends.")
@@ -427,7 +427,7 @@ def _clean_drawing(kind: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 class DrawingIn(BaseModel):
-    kind: Literal["pen", "arrow", "rect", "ellipse", "text"]
+    kind: Literal["pen", "arrow", "line", "rect", "ellipse", "text"]
     color: str = "#e5484d"
     width: float = 3.0
     data: dict[str, Any] = Field(default_factory=dict)

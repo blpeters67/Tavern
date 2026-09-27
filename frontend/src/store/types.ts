@@ -304,7 +304,7 @@ export interface BoardToken {
 export interface BoardDrawing {
   id: number;
   board_id: number;
-  kind: 'pen' | 'arrow' | 'rect' | 'ellipse' | 'text';
+  kind: 'pen' | 'arrow' | 'line' | 'rect' | 'ellipse' | 'text';
   color: string;
   width: number;
   data:
