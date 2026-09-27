@@ -464,48 +464,45 @@ body.col-resizing * {
   user-select: none !important;
 }
 
+/* Drawn like the text/voice splitter in the channel list: a faint line with a
+   small oval grip that turns gold on hover. A plain click on the grip brings
+   the channel list back after it has been pulled away. */
+
 .app-split {
-  flex: 0 0 6px;
   position: relative;
+  flex: 0 0 11px;
   z-index: 5;
   cursor: col-resize;
   touch-action: none;
-  background: transparent;
-  transition: background 0.12s ease;
 }
 
-.app-split:hover {
-  background: var(--bg-mod-hover);
-}
-
-.app-split.collapsed {
-  flex-basis: 18px;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--divider);
-}
-
-.app-split-tab {
+.app-split::before {
+  content: '';
   position: absolute;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  width: 18px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--divider);
-  border-left: none;
-  border-radius: 0 7px 7px 0;
-  background: var(--bg-secondary);
-  color: var(--interactive-normal);
-  cursor: pointer;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--panel-border);
 }
 
-.app-split-tab:hover {
-  color: var(--interactive-hover);
-  background: var(--bg-mod-hover);
+.app-split span {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 5px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1px var(--divider-strong);
+  transition: background-color 0.1s;
+}
+
+.app-split:hover span,
+.app-split.resizing span {
+  background: var(--gold-dim);
+  box-shadow: none;
 }
 
 /* ---------- Nothing yet ---------- */

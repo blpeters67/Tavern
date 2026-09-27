@@ -6,7 +6,7 @@ import ChannelSidebar from '../components/ChannelSidebar';
 import ChatView from '../components/ChatView';
 import CommunityPage from '../components/CommunityPage';
 import HomeSidebar from '../components/HomeSidebar';
-import { Icon, mdiChevronRight, TavernLogo } from '../components/icons';
+import { TavernLogo } from '../components/icons';
 import { JukeboxWindowHost } from '../components/Jukebox';
 import { BoardRoom } from '../components/GameBoard';
 import { TheaterScreenHost } from '../components/Theater';
@@ -128,10 +128,11 @@ function fallbackChannel(s: State, serverId: number): number | null {
 }
 
 /**
- * The board's draggable column edges: pull the channel list in to hide it (a
- * tab brings it back), or resize the chat column. The width goes straight to
- * the DOM while dragging so the chat and board don't re-render per move; the
- * store (and localStorage) only change on release.
+ * The board's draggable column edges, drawn like the channel list's text/voice
+ * splitter: a faint line with a little oval grip that turns gold on hover.
+ * Pull the channel list in to hide it; a plain click on the grip brings it
+ * back. Widths go straight to the DOM while dragging so the chat and board
+ * don't re-render per move; localStorage only changes on release.
  */
 function ColumnHandle({
   side,
@@ -146,16 +147,18 @@ function ColumnHandle({
   onReset: () => void;
   onExpand?: () => void;
 }) {
-  const drag = useRef<{ startX: number; startW: number; last: number; moved: boolean } | null>(null);
+  const drag = useRef<{ startX: number; startW: number; last: number; moved: boolean; node: HTMLElement } | null>(null);
   const target = () =>
     side === 'left'
       ? document.querySelector<HTMLElement>('.app-nav .sidebar')
       : document.querySelector<HTMLElement>('.app > .right-panel');
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    const node = e.currentTarget;
+    node.setPointerCapture(e.pointerId);
+    node.classList.add('resizing');
     const el = target();
-    drag.current = { startX: e.clientX, startW: el?.getBoundingClientRect().width ?? (side === 'left' ? 240 : 380), last: -1, moved: false };
+    drag.current = { startX: e.clientX, startW: el?.getBoundingClientRect().width ?? (side === 'left' ? 240 : 380), last: -1, moved: false, node };
     document.body.classList.add('col-resizing');
   };
   const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -175,11 +178,14 @@ function ColumnHandle({
     const d = drag.current;
     drag.current = null;
     document.body.classList.remove('col-resizing');
-    if (d?.moved && d.last >= 0) onCommit(d.last);
+    d?.node.classList.remove('resizing');
+    if (!d) return;
+    if (d.moved && d.last >= 0) onCommit(d.last);
+    else if (!d.moved && collapsed && onExpand) onExpand();
   };
   return (
     <div
-      className={`app-split ${collapsed ? 'collapsed' : ''}`}
+      className="app-split"
       role="separator"
       aria-orientation="vertical"
       aria-label={side === 'left' ? 'Resize or hide the channel list' : 'Resize the chat column'}
@@ -189,11 +195,7 @@ function ColumnHandle({
       onPointerCancel={onUp}
       onDoubleClick={onReset}
     >
-      {collapsed && (
-        <button className="app-split-tab" aria-label="Show the channel list" onPointerDown={(e) => e.stopPropagation()} onClick={onExpand}>
-          <Icon path={mdiChevronRight} size={13} />
-        </button>
-      )}
+      <span />
     </div>
   );
 }

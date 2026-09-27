@@ -493,7 +493,8 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
   lastChannelByServer so joining voice keeps the messages beside the map. Two ColumnHandle
   separators (AppShell) drag the side columns: widths go to the DOM while dragging and land
   in localStorage (boardLeftW / boardRightW) on release; pulling the channel list in below
-  ~110 px tucks it away to width 0 with a tab to bring it back, double-click resets. The
+  ~110 px tucks it away to width 0, the oval grip staying put (a plain click on it brings the
+  list back); double-click resets. The
   right column's cards scrollbox is capped at 45% height in board mode so the chat below it
   keeps its space. Both handles and the board's right column hide under 900 px like the old
   board chat did.
