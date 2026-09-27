@@ -231,20 +231,21 @@ function cardTexture(T: Three, card: BoardCard): import('three').Texture {
     ctx.lineWidth = 4;
     ctx.strokeStyle = card.color || 'rgba(122, 162, 247, 0.6)';
     ctx.stroke();
-    // "<name> rolled — <title>", trimmed to fit
+    // "<name> rolled — <title>", trimmed to fit (with an ellipsis when it must)
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     const tx = ax + ar + 26;
-    const room = W - tx - (card.total ? 240 : 30);
+    const room = W - tx - 40;
     const nameFont = `700 42px ${ui}`;
     const restFont = `500 36px ${ui}`;
     ctx.font = nameFont;
     const nameW = ctx.measureText(card.name).width;
+    const fullTitle = card.title;
     let title = card.title;
     ctx.font = restFont;
     const lineW = () => nameW + ctx.measureText(` rolled — ${title}`).width;
-    while (lineW() > room && title.length > 4) title = title.slice(0, -2);
-    if (lineW() > room) title = title.slice(0, 3) + '…';
+    while (lineW() > room && title.length > 1) title = title.slice(0, -1);
+    if (title !== fullTitle) title = `${title.trimEnd()}…`;
     ctx.font = nameFont;
     ctx.fillStyle = card.color || '#8ab4f8';
     ctx.fillText(card.name, tx, 86);
