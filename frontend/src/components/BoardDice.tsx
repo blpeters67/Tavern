@@ -10,6 +10,10 @@
  * dice are actually used, and there are no third-party assets to credit.
  */
 import { useEffect, useRef } from 'react';
+import { useStore } from '../store/store';
+
+/** Same preference check the chat dice use before animating. */
+const reduceMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /** One die to drop: its shape and the value it must land on. */
 export interface BoardDie {
@@ -44,9 +48,14 @@ const MAX_DICE = 12;
 const DIE_PX = 82;
 /** Roughly the visible width of the board's floor at the camera distance. */
 const VIS_W = 3.27;
-/** Tumble until this long after the roll, then settle onto the value. */
-const SETTLE_MS = 1250;
-const SETTLE_LERP_MS = 380;
+/** The tumble runs until ALIGN_START, then eases onto the landing pose over
+ *  ALIGN_MS: the rotation finishes exactly as the die touches down (LAND_MS),
+ *  so nothing swivels after it has come to rest. */
+const ALIGN_START = 860;
+const ALIGN_MS = 380;
+const LAND_MS = ALIGN_START + ALIGN_MS;
+/** Everything is static by here (label and badge faded in): stop drawing. */
+const IDLE_AT = LAND_MS + 220;
 /** Settled dice stay this long, then fade out. */
 const STAY_MS = 12000;
 const FADE_MS = 750;
@@ -102,10 +111,13 @@ function getPipTexture(T: Three): import('three').Texture {
   return pipTexture;
 }
 
-/** The canvas the numbers live on: 25 square cells, value 1..25. */
-let numberTexture: import('three').Texture | null = null;
-function getNumberTexture(T: Three): import('three').Texture {
-  if (numberTexture) return numberTexture;
+/** The canvas the numbers live on: 25 square cells, value 1..25. One canvas
+ *  per die shape: the d10's kite faces are the tightest of all and take
+ *  smaller numbers than the shapes the d4/d8 were tuned with. */
+const numberTextures = new Map<number, import('three').Texture>();
+function getNumberTexture(T: Three, sides: number): import('three').Texture {
+  const hit = numberTextures.get(sides);
+  if (hit) return hit;
   const cell = 256;
   const c = document.createElement('canvas');
   c.width = cell * 5;
@@ -114,17 +126,22 @@ function getNumberTexture(T: Three): import('three').Texture {
   ctx.fillStyle = BASE;
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = INK;
-  ctx.font = `700 ${cell * 0.42}px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (let v = 1; v <= 25; v++) {
+    // Two-digit numbers must fit the narrowest faces that use them (the d20's
+    // triangles, the d10's kites), so they are drawn smaller than the single
+    // digits; one size for everything clipped their corners.
+    const f = sides === 10 ? (v < 10 ? 0.32 : 0.19) : v < 10 ? 0.42 : 0.23;
+    ctx.font = `700 ${cell * f}px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`;
     const cx = ((v - 1) % 5) * cell + cell / 2;
     const cy = Math.floor((v - 1) / 5) * cell + cell / 2;
     ctx.fillText(String(v), cx, cy + cell * 0.02);
   }
-  numberTexture = new T.CanvasTexture(c);
-  numberTexture.colorSpace = T.SRGBColorSpace;
-  return numberTexture;
+  const tex = new T.CanvasTexture(c);
+  tex.colorSpace = T.SRGBColorSpace;
+  numberTextures.set(sides, tex);
+  return tex;
 }
 
 let shadowTexture: import('three').Texture | null = null;
@@ -243,7 +260,11 @@ async function buildCube(T: Three): Promise<DieGeo> {
   return { geo, faces };
 }
 
-/** The pentagonal trapezohedron (the real d10 shape, planar kites), soup. */
+/** The pentagonal trapezohedron (the real d10 shape, planar kites), soup.
+ *  Kites are emitted two triangles at a time in value order: 1-5 around the
+ *  top apex, then 6-10 on the bottom, each face five away from its opposite.
+ *  Both windings were picked so the cross product points away from the centre
+ *  (the old build had the top half inside out). */
 function buildD10(T: Three): Geo {
   // Ring height and apex height are tied: yT = 9.47 * y1 keeps the kite faces
   // planar (checked by hand on the cross product), so each face shades flat.
@@ -265,10 +286,12 @@ function buildD10(T: Three): Geo {
     tris.push(...a, ...b, ...c, ...a, ...c, ...d);
   };
   for (let i = 0; i < 5; i++) {
-    quad(top, U[i], L[i], U[(i + 1) % 5]);
+    quad(U[(i + 1) % 5], L[i], U[i], top);
   }
-  for (let i = 0; i < 5; i++) {
-    quad(bot, L[i], U[(i + 1) % 5], L[(i + 1) % 5]);
+  for (let v = 0; v < 5; v++) {
+    // Value 6 + v goes on the bottom kite opposite top v (two steps around).
+    const j = (v + 2) % 5;
+    quad(bot, L[j], U[(j + 1) % 5], L[(j + 1) % 5]);
   }
   const g = new T.BufferGeometry();
   g.setAttribute('position', new T.Float32BufferAttribute(tris, 3));
@@ -276,63 +299,86 @@ function buildD10(T: Three): Geo {
   return g;
 }
 
-/** Bake a triangle-soup geometry: group by plane, point each face at a cell. */
-function bakePoly(T: Three, geo: Geo, suffix: string): DieGeo {
-  const pos = geo.getAttribute('position');
-  const triCount = pos.count / 3;
-  const nrm = (t: number): [number, number, number] => {
-    const i = t * 3;
-    const ux = pos.getX(i + 1) - pos.getX(i);
-    const uy = pos.getY(i + 1) - pos.getY(i);
-    const uz = pos.getZ(i + 1) - pos.getZ(i);
-    const vx = pos.getX(i + 2) - pos.getX(i);
-    const vy = pos.getY(i + 2) - pos.getY(i);
-    const vz = pos.getZ(i + 2) - pos.getZ(i);
-    const nx = uy * vz - uz * vy;
-    const ny = uz * vx - ux * vz;
-    const nz = ux * vy - uy * vx;
-    const ln = Math.hypot(nx, ny, nz) || 1;
-    return [nx / ln, ny / ln, nz / ln];
+/** Corner data as both plain and interleaved attributes expose it. */
+type Attr = import('three').BufferAttribute | import('three').InterleavedBufferAttribute;
+
+/** Unit normal of triangle t of a triangle-soup geometry. */
+function triNormal(pos: Attr, t: number): [number, number, number] {
+  const i = t * 3;
+  const ux = pos.getX(i + 1) - pos.getX(i);
+  const uy = pos.getY(i + 1) - pos.getY(i);
+  const uz = pos.getZ(i + 1) - pos.getZ(i);
+  const vx = pos.getX(i + 2) - pos.getX(i);
+  const vy = pos.getY(i + 2) - pos.getY(i);
+  const vz = pos.getZ(i + 2) - pos.getZ(i);
+  const nx = uy * vz - uz * vy;
+  const ny = uz * vx - ux * vz;
+  const nz = ux * vy - uy * vx;
+  const ln = Math.hypot(nx, ny, nz) || 1;
+  return [nx / ln, ny / ln, nz / ln];
+}
+
+/** A plane key for grouping: rounds first (which turns -0.00 into 0.00) and
+ *  snaps near-axis noise to zero, so one physical face can never split into
+ *  two entries over a signed zero. */
+function planeKey(n: [number, number, number]): string {
+  const q = (v: number) => {
+    const r = Math.round(v * 100) / 100;
+    return (Math.abs(r) < 0.005 ? 0 : r).toFixed(2);
   };
-  // Group triangles that share a plane: same unit normal to 2 decimals.
-  const groups: number[][] = [];
-  const keys = new Map<string, number>();
-  for (let t = 0; t < triCount; t++) {
-    const key = nrm(t).map((v) => v.toFixed(2)).join(',') + suffix;
-    let g = keys.get(key);
-    if (g === undefined) {
-      g = groups.length;
-      keys.set(key, g);
-      groups.push([]);
+  return `${q(n[0])},${q(n[1])},${q(n[2])}`;
+}
+
+/** Unique corner positions of a face: soup geometry repeats a corner once per
+ *  triangle it belongs to, so de-duplicate by position — averaging the raw
+ *  triangle corners would pull the face centre toward whichever corner the
+ *  triangulation fanned out from. */
+function faceVertices(pos: Attr, tris: number[]) {
+  const corners: number[] = [];
+  const uniq: [number, number, number][] = [];
+  const seen = new Set<string>();
+  for (const t of tris) {
+    for (let k = 0; k < 3; k++) {
+      const vi = t * 3 + k;
+      corners.push(vi);
+      const x = pos.getX(vi);
+      const y = pos.getY(vi);
+      const z = pos.getZ(vi);
+      const key = `${x.toFixed(5)},${y.toFixed(5)},${z.toFixed(5)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniq.push([x, y, z]);
+      }
     }
-    groups[g].push(t);
   }
+  return { corners, uniq };
+}
+
+/** Point every face group at its own cell of the number canvas (with the face
+ *  mapped inside the middle 68% of the cell, so nothing samples a neighbour)
+ *  and return the landing table: group g is the face that shows value g + 1. */
+function bakeFaceGroups(T: Three, geo: Geo, groups: number[][]): FaceInfo[] {
+  const pos = geo.getAttribute('position');
   const uv = new Float32Array(pos.count * 2);
   const faces: FaceInfo[] = [];
   groups.forEach((tris, idx) => {
-    const verts: number[] = [];
-    for (const t of tris) {
-      for (let k = 0; k < 3; k++) {
-        const vi = t * 3 + k;
-        if (!verts.includes(vi)) verts.push(vi);
-      }
-    }
+    const { corners, uniq } = faceVertices(pos, tris);
     let cx = 0;
     let cy = 0;
     let cz = 0;
-    for (const vi of verts) {
-      cx += pos.getX(vi);
-      cy += pos.getY(vi);
-      cz += pos.getZ(vi);
+    for (const [x, y, z] of uniq) {
+      cx += x;
+      cy += y;
+      cz += z;
     }
-    cx /= verts.length;
-    cy /= verts.length;
-    cz /= verts.length;
+    cx /= uniq.length;
+    cy /= uniq.length;
+    cz /= uniq.length;
     let nx = 0;
     let ny = 0;
     let nz = 0;
     for (const t of tris) {
-      const n = nrm(t);
+      const n = triNormal(pos, t);
       nx += n[0];
       ny += n[1];
       nz += n[2];
@@ -344,11 +390,11 @@ function bakePoly(T: Three, geo: Geo, suffix: string): DieGeo {
     // readUp: toward the face's highest vertex, within the face plane.
     let up: [number, number, number] = [1, 0, 0];
     let best = -Infinity;
-    for (const vi of verts) {
-      const dy = pos.getY(vi) - cy;
+    for (const [x, y, z] of uniq) {
+      const dy = y - cy;
       if (dy > best) {
         best = dy;
-        up = [pos.getX(vi) - cx, dy, pos.getZ(vi) - cz];
+        up = [x - cx, dy, z - cz];
       }
     }
     const ul = Math.hypot(up[0], up[1], up[2]) || 1;
@@ -356,9 +402,9 @@ function bakePoly(T: Three, geo: Geo, suffix: string): DieGeo {
     // right = e2 x normal: faces read non-mirrored when seen from outside.
     const e1: [number, number, number] = [e2[1] * nz - e2[2] * ny, e2[2] * nx - e2[0] * nz, e2[0] * ny - e2[1] * nx];
     let maxLocal = 1e-6;
-    for (const vi of verts) {
-      const lu = (pos.getX(vi) - cx) * e1[0] + (pos.getY(vi) - cy) * e1[1] + (pos.getZ(vi) - cz) * e1[2];
-      const lv = (pos.getX(vi) - cx) * e2[0] + (pos.getY(vi) - cy) * e2[1] + (pos.getZ(vi) - cz) * e2[2];
+    for (const [x, y, z] of uniq) {
+      const lu = (x - cx) * e1[0] + (y - cy) * e1[1] + (z - cz) * e1[2];
+      const lv = (x - cx) * e2[0] + (y - cy) * e2[1] + (z - cz) * e2[2];
       maxLocal = Math.max(maxLocal, Math.hypot(lu, lv));
     }
     const value = idx + 1;
@@ -367,16 +413,51 @@ function bakePoly(T: Three, geo: Geo, suffix: string): DieGeo {
     const ccu = (col + 0.5) / 5;
     const ccv = 1 - (row + 0.5) / 5;
     const s = 0.34 / 5 / maxLocal;
-    for (const vi of verts) {
-      const lu = (pos.getX(vi) - cx) * e1[0] + (pos.getY(vi) - cy) * e1[1] + (pos.getZ(vi) - cz) * e1[2];
-      const lv = (pos.getX(vi) - cx) * e2[0] + (pos.getY(vi) - cy) * e2[1] + (pos.getZ(vi) - cz) * e2[2];
+    for (const vi of corners) {
+      const x = pos.getX(vi);
+      const y = pos.getY(vi);
+      const z = pos.getZ(vi);
+      const lu = (x - cx) * e1[0] + (y - cy) * e1[1] + (z - cz) * e1[2];
+      const lv = (x - cx) * e2[0] + (y - cy) * e2[1] + (z - cz) * e2[2];
       uv[vi * 2] = ccu + lu * s;
       uv[vi * 2 + 1] = ccv + lv * s;
     }
     faces[value - 1] = { normal: new T.Vector3(nx, ny, nz), readUp: new T.Vector3(e2[0], e2[1], e2[2]) };
   });
   geo.setAttribute('uv', new T.BufferAttribute(uv, 2));
-  return { geo, faces };
+  return faces;
+}
+
+/** Bake a triangle-soup polyhedron: group its triangles into physical faces,
+ *  then map each face to its cell. `sides` is the face count the shape really
+ *  has — a grouping that finds anything else is a bug and throws here rather
+ *  than quietly landing rolled values on the wrong faces. */
+function bakePoly(T: Three, geo: Geo, suffix: string, sides: number): DieGeo {
+  const pos = geo.getAttribute('position');
+  const triCount = pos.count / 3;
+  const groups: number[][] = [];
+  const keys = new Map<string, number>();
+  for (let t = 0; t < triCount; t++) {
+    const key = planeKey(triNormal(pos, t)) + suffix;
+    let g = keys.get(key);
+    if (g === undefined) {
+      g = groups.length;
+      keys.set(key, g);
+      groups.push([]);
+    }
+    groups[g].push(t);
+  }
+  if (groups.length !== sides) throw new Error(`${suffix}: expected ${sides} faces, found ${groups.length}`);
+  return { geo, faces: bakeFaceGroups(T, geo, groups) };
+}
+
+/** Bake the d10: its kites are built two triangles at a time in value order,
+ *  so the face table is explicit and needs no grouping. */
+function bakeD10Die(T: Three): DieGeo {
+  const geo = buildD10(T);
+  const groups: number[][] = [];
+  for (let k = 0; k < 10; k++) groups.push([k * 2, k * 2 + 1]);
+  return { geo, faces: bakeFaceGroups(T, geo, groups) };
 }
 
 /** Build (once) the unit geometry for a shape. */
@@ -385,11 +466,11 @@ async function getDieGeo(T: Three, sides: number): Promise<DieGeo | null> {
   if (hit) return hit;
   let dg: DieGeo | null = null;
   if (sides === 6) dg = await buildCube(T);
-  else if (sides === 4) dg = bakePoly(T, new T.TetrahedronGeometry(0.5), 't4');
-  else if (sides === 8) dg = bakePoly(T, new T.OctahedronGeometry(0.55), 't8');
-  else if (sides === 10) dg = bakePoly(T, buildD10(T), 't10');
-  else if (sides === 12) dg = bakePoly(T, new T.DodecahedronGeometry(0.48), 't12');
-  else if (sides === 20) dg = bakePoly(T, new T.IcosahedronGeometry(0.5), 't20');
+  else if (sides === 4) dg = bakePoly(T, new T.TetrahedronGeometry(0.5), 't4', 4);
+  else if (sides === 8) dg = bakePoly(T, new T.OctahedronGeometry(0.55), 't8', 8);
+  else if (sides === 10) dg = bakeD10Die(T);
+  else if (sides === 12) dg = bakePoly(T, new T.DodecahedronGeometry(0.48), 't12', 12);
+  else if (sides === 20) dg = bakePoly(T, new T.IcosahedronGeometry(0.5), 't20', 20);
   if (dg) geos.set(sides, dg);
   return dg;
 }
@@ -427,6 +508,7 @@ interface World {
   dice: Die[];
   label: SpriteO | null;
   raf: number;
+  fadeTimer: number;
   start: number;
   dieSize: number;
   observer: ResizeObserver;
@@ -445,7 +527,7 @@ function heightAt(t: number, h0: number, size: number): number {
     const u = (t - 620) / 340;
     return rest + size * 0.55 * Math.sin(Math.PI * u) * (1 - u * 0.25);
   }
-  if (t < 1240) {
+  if (t < LAND_MS) {
     const u = (t - 960) / 280;
     return rest + size * 0.16 * Math.sin(Math.PI * u) * (1 - u * 0.4);
   }
@@ -454,7 +536,8 @@ function heightAt(t: number, h0: number, size: number): number {
 
 /** Spin the die so face `value` lands up (or down for the d4), reading upright. */
 function settleQuat(T: Three, dg: DieGeo, value: number, down: boolean): import('three').Quaternion {
-  const face = dg.faces[((value - 1) % dg.faces.length + dg.faces.length) % dg.faces.length];
+  const face = dg.faces[value - 1];
+  if (!face) return new T.Quaternion();
   const faceQ = new T.Quaternion().setFromUnitVectors(face.normal.clone().normalize(), new T.Vector3(0, down ? -1 : 1, 0));
   const rU = face.readUp.clone().applyQuaternion(faceQ);
   // Spin about the vertical so the top face's "up" points away from the
@@ -482,7 +565,7 @@ function spawnDie(T: Three, world: World, dg: DieGeo, die: BoardDie, index: numb
   const h0 = size * (4.2 + Math.random() * 1.4);
 
   const mat = new T.MeshStandardMaterial({
-    map: die.sides === 6 ? getPipTexture(T) : getNumberTexture(T),
+    map: die.sides === 6 ? getPipTexture(T) : getNumberTexture(T, die.sides),
     roughness: 0.46,
     metalness: 0.02,
     flatShading: die.sides !== 6,
@@ -565,6 +648,10 @@ function removeDie(world: World, d: Die) {
 }
 
 function clearWorld(world: World) {
+  if (world.fadeTimer) {
+    window.clearTimeout(world.fadeTimer);
+    world.fadeTimer = 0;
+  }
   for (const d of world.dice) removeDie(world, d);
   world.dice = [];
   if (world.label) {
@@ -580,13 +667,13 @@ function tick(world: World) {
   const t = performance.now() - world.start;
   const size = world.dieSize;
   for (const d of world.dice) {
-    if (t < 1240) {
+    if (t < LAND_MS) {
       const u = easeOutCubic(Math.min(1, t / 620));
       d.x = d.from.x + (d.to.x - d.from.x) * u;
       d.z = d.from.z + (d.to.z - d.from.z) * u;
       d.y = heightAt(t, d.h0, size);
     }
-    if (t < SETTLE_MS) {
+    if (t < ALIGN_START) {
       d.group.quaternion.setFromAxisAngle(d.spinAxis, d.spinRate * (t / 1000));
     } else {
       if (d.phase === 0) {
@@ -594,12 +681,15 @@ function tick(world: World) {
         d.spinAt = t;
         d.startQ.copy(d.group.quaternion);
       }
-      const u = Math.min(1, (t - d.spinAt) / SETTLE_LERP_MS);
+      // The tumble turns into the landing pose while the die is still in the
+      // air: the slerp eases out and lands on the value at touchdown, so the
+      // die never swivels after coming to rest.
+      const u = Math.min(1, (t - d.spinAt) / ALIGN_MS);
       d.group.quaternion.slerpQuaternions(d.startQ, d.settleQ, easeOutCubic(u));
       if (u >= 1) d.phase = 2;
     }
     if (d.badge && d.phase === 2) {
-      const bu = Math.min(1, Math.max(0, (t - d.spinAt - SETTLE_LERP_MS) / 160));
+      const bu = Math.min(1, Math.max(0, (t - d.spinAt - ALIGN_MS) / 160));
       d.badge.material.opacity = bu;
       const s = size * 0.6 * (0.7 + 0.3 * easeOutCubic(bu));
       d.badge.scale.set(s, s, 1);
@@ -611,7 +701,7 @@ function tick(world: World) {
     d.shadow.material.opacity = 0.32 * Math.max(0.25, 1 - lift / 3);
   }
   if (world.label) {
-    const lu = Math.min(1, Math.max(0, (t - SETTLE_MS - SETTLE_LERP_MS) / 200));
+    const lu = Math.min(1, Math.max(0, (t - LAND_MS) / 200));
     world.label.material.opacity = lu;
   }
 
@@ -631,7 +721,23 @@ function tick(world: World) {
   if (gone) clearWorld(world);
 
   world.renderer.render(world.scene, world.camera);
-  world.raf = world.dice.length ? requestAnimationFrame(() => tick(world)) : 0;
+  if (!world.dice.length) {
+    world.raf = 0;
+    return;
+  }
+  // Settled dice would otherwise be redrawn the same way ~600 times while they
+  // linger; draw the still frame once and wake up again when the fade is due.
+  if (t >= IDLE_AT) {
+    world.raf = 0;
+    if (!world.fadeTimer) {
+      world.fadeTimer = window.setTimeout(() => {
+        world.fadeTimer = 0;
+        world.raf = requestAnimationFrame(() => tick(world));
+      }, Math.max(30, STAY_MS - t));
+    }
+    return;
+  }
+  world.raf = requestAnimationFrame(() => tick(world));
 }
 
 async function ensureWorld(host: HTMLElement): Promise<World> {
@@ -663,6 +769,7 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     dice: [],
     label: null,
     raf: 0,
+    fadeTimer: 0,
     start: 0,
     dieSize: 0.36,
     observer: null as unknown as ResizeObserver,
@@ -677,6 +784,8 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
     // Keep the dice the same size ON SCREEN whatever the stage is: the world
     // span the camera sees at the dice plane scales with the aspect ratio.
     world.dieSize = Math.min(0.55, Math.max(0.14, (DIE_PX * VIS_W * (w / h)) / w));
+    // While nothing is animating, a resize still needs one fresh frame.
+    if (!world.raf && world.dice.length) renderer.render(scene, camera);
   };
   world.observer = new ResizeObserver(resize);
   world.observer.observe(host);
@@ -688,20 +797,39 @@ async function ensureWorld(host: HTMLElement): Promise<World> {
   return world;
 }
 
+/** Tear a world down completely — frames, observers, timers, GL context. */
+function disposeWorld(world: World) {
+  if (world.raf) cancelAnimationFrame(world.raf);
+  world.raf = 0;
+  world.observer.disconnect();
+  clearWorld(world);
+  world.renderer.dispose();
+  world.renderer.domElement.remove();
+}
+
 export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<World | null>(null);
   const wantedRef = useRef<BoardRoll | null>(null);
   const playingRef = useRef(false);
+  // Bumped on unmount so an initialization that is still in flight knows the
+  // board is gone and disposes itself instead of animating a dead canvas.
+  const genRef = useRef(0);
 
   const play = useRef(async () => {
     const host = hostRef.current;
     const want = wantedRef.current;
     if (!host || !want || playingRef.current) return;
     playingRef.current = true;
+    const gen = genRef.current;
     try {
       let world = worldRef.current;
       if (!world || world.host !== host) worldRef.current = world = await ensureWorld(host);
+      if (gen !== genRef.current) {
+        disposeWorld(world);
+        if (worldRef.current === world) worldRef.current = null;
+        return;
+      }
 
       // Only the shapes this roll actually uses need building first.
       const wanted = want.dice.slice(0, MAX_DICE).filter((d) => (SHAPES as readonly number[]).includes(d.sides));
@@ -711,6 +839,7 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
         const dg = await getDieGeo(world.T, d.sides);
         if (dg) built.set(d.sides, dg);
       }
+      if (gen !== genRef.current) return; // the board closed while building
       if (wantedRef.current !== want) return; // a newer roll arrived while building
       if (world.raf) cancelAnimationFrame(world.raf);
       world.raf = 0;
@@ -746,21 +875,19 @@ export function BoardDiceOverlay({ roll }: { roll: BoardRoll | null }) {
 
   useEffect(() => {
     if (!roll) return;
+    // The chat card already carries the result; the drop is decoration, so it
+    // waits for the same preferences the chat dice wait for.
+    if (!(useStore.getState().me?.settings.dice_animations ?? true) || reduceMotion()) return;
     wantedRef.current = roll;
     void play.current();
   }, [roll]);
 
   useEffect(
     () => () => {
+      genRef.current += 1; // stop an in-flight initialization from landing
       const world = worldRef.current;
-      if (world) {
-        if (world.raf) cancelAnimationFrame(world.raf);
-        world.observer?.disconnect();
-        clearWorld(world);
-        world.renderer.dispose();
-        world.renderer.domElement.remove();
-      }
       worldRef.current = null;
+      if (world) disposeWorld(world);
     },
     [],
   );

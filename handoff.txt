@@ -519,11 +519,19 @@ frontend/scripts/build-emoji.mjs     Makes src/generated/emoji.json and public/t
 - Dice on the board are their own layer (components/BoardDice.tsx): it watches rolls and drops
   dice that tumble to the SERVER's numbers (the client never rolls). Every die is generated in
   code — geometry AND textures (canvas pips for the rounded d6, canvas numbers for d4-d20),
-  with per-face UVs, so each face carries its own number and nothing is fetched. Dice are
+  with per-face UVs, so each face carries its own number and nothing is fetched. The d10 is a
+  proper pentagonal trapezohedron with an explicit ten-kite face table; the other solids group
+  triangles into faces by quantized plane normal and THROW if the count does not match the
+  shape, so a rolled value can never land on the wrong face. Number size is per shape (d10
+  and two-digit numbers are drawn smaller) so every number fits inside its face. Dice are
   sized in CSS pixels against the stage (82 px) rather than in world units, so they read the
-  same on any window size. On settling the rolled value is spun face-up and upright (the d4
-  rests ON its value, so it keeps a small floating badge), and the roller's name sits on the
-  felt under the dice. They clear 12 s after settling (0.75 s fade).
+  same on any window size. The tumble eases onto the landing pose while the die is still in
+  the air and is done at touchdown (~1.24 s) — nothing rotates after it rests; the d4 rests
+  ON its value and keeps a small floating badge. Rendering stops entirely once everything is
+  static (one still frame, the fade scheduled with a timer) and dice clear 12 s after
+  settling (0.75 s fade). Rolling honours the same rolling-animation setting and
+  prefers-reduced-motion as the chat dice — with motion off no renderer is created at all —
+  and unmounting mid-initialization disposes the half-built world (generation counter).
 - While the board shows a channel's chat, AppShell does NOT mount the original ChatView
   underneath (single instance owns scrolling and read state).
 - The tools strip: select, the DM's token/background, then pen, arrow, line, rectangle,
